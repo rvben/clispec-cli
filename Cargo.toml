@@ -1,0 +1,23 @@
+[package]
+name = "clispec"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Score CLI tools against The CLI Spec"
+license = "MIT"
+repository = "https://github.com/rvben/clispec-cli"
+keywords = ["cli", "spec", "scoring", "agent"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+owo-colors = "4"
+thiserror = "2"
+which = "7"
+
+[profile.release]
+strip = true
+lto = true
