@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_pypi:
+        description: 'Skip publishing to PyPI (if already published)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -64,6 +69,21 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Install maturin
+        run: pip install maturin ziglang
+
+      - name: Build wheel
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            *-gnu)
+              maturin build --release --target ${{ matrix.target }} --zig
+              ;;
+            *)
+              maturin build --release --target ${{ matrix.target }}
+              ;;
+          esac
+
       - name: Build binary
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -92,6 +112,12 @@ jobs:
 
           rm -rf release-package
 
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          path: target/wheels/*
+          name: wheel-${{ matrix.target }}
+
       - name: Upload release archives
         uses: actions/upload-artifact@v4
         with:
@@ -99,9 +125,24 @@ jobs:
             clispec-*-${{ matrix.target }}.tar.gz*
           name: release-${{ matrix.target }}
 
+  sdist:
+    name: Build source distribution
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install maturin
+        run: pip install maturin
+      - name: Build sdist
+        run: maturin sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: target/wheels/*.tar.gz
+
   release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, sdist]
     steps:
       - uses: actions/checkout@v4
 
@@ -123,10 +164,19 @@ jobs:
         if: ${{ inputs.skip_crates_io == true }}
         run: echo "Skipping crates.io publishing as requested"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Publish to PyPI
+        if: ${{ inputs.dry_run != true && inputs.skip_pypi != true }}
+        run: uv publish artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
 
       - name: Create Release
         if: ${{ inputs.dry_run != true }}
