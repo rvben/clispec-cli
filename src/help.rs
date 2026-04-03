@@ -10,8 +10,8 @@ pub fn parse_help(help_text: &str) -> HelpInfo {
 
     // Detect flags
     for flag in &[
-        "--json", "--quiet", "--yes", "--force", "--limit", "--offset", "--cursor", "--page",
-        "--fields", "--format",
+        "--json", "--quiet", "-q", "--yes", "--force", "--limit", "--offset", "--cursor", "--page",
+        "--fields", "--format", "--output", "-o",
     ] {
         if lower.contains(flag) {
             flags.push(flag.to_string());

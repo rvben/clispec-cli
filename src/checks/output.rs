@@ -8,20 +8,39 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let help_info = help::parse_help(&ctx.help_text);
     let mut checks = Vec::new();
 
-    // Check 1: --json flag in help
-    checks.push(if help_info.has_flag("--json") {
-        CheckResult::pass("--json flag")
+    // Check 1: JSON output flag in help (--json, --output, -o, --format)
+    let has_json_flag = help_info.has_flag("--json")
+        || help_info.has_flag("--output")
+        || help_info.has_flag("--format")
+        || help_info.has_flag("-o");
+    checks.push(if has_json_flag {
+        CheckResult::pass("JSON output flag")
     } else {
-        CheckResult::fail("--json flag")
+        CheckResult::fail("JSON output flag")
     });
 
-    // Check 2: Valid JSON with --json
+    // Check 2: Valid JSON output
+    // Try multiple flag conventions to find one that works
     if !ctx.subcommand.is_empty() {
-        let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
-        args.push("--json");
-        let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
-        let is_valid = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();
-        checks.push(if is_valid && result.exit_code == 0 {
+        let json_flags: &[&[&str]] = &[
+            &["--json"],
+            &["-o", "json"],
+            &["--output", "json"],
+            &["--format", "json"],
+        ];
+        let mut found_valid = false;
+        for flags in json_flags {
+            let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
+            args.extend_from_slice(flags);
+            let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+            if result.exit_code == 0
+                && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
+            {
+                found_valid = true;
+                break;
+            }
+        }
+        checks.push(if found_valid {
             CheckResult::pass("Valid JSON output")
         } else {
             CheckResult::fail("Valid JSON output")
@@ -70,12 +89,14 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         CheckResult::fail("Structured errors")
     });
 
-    // Check 5: --quiet flag
-    checks.push(if help_info.has_flag("--quiet") {
-        CheckResult::pass("--quiet flag")
-    } else {
-        CheckResult::fail("--quiet flag")
-    });
+    // Check 5: --quiet or -q flag
+    checks.push(
+        if help_info.has_flag("--quiet") || help_info.has_flag("-q") {
+            CheckResult::pass("--quiet flag")
+        } else {
+            CheckResult::fail("--quiet flag")
+        },
+    );
 
     PrincipleScore::new("Structured Output", checks, 5)
 }
