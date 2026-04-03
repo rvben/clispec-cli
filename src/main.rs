@@ -1,3 +1,7 @@
+mod checks;
+mod help;
+mod runner;
+
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -33,12 +37,73 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Score {
-            binary,
-            subcommand: _,
-        } => {
-            eprintln!("Scoring {binary}...");
-            todo!()
+        Commands::Score { binary, subcommand } => {
+            let help_result = runner::run(&binary, &["--help"], std::time::Duration::from_secs(5));
+            let help_info = help::parse_help(&help_result.stdout);
+
+            if help_result.exit_code != 0 {
+                eprintln!("Warning: --help exited with {}", help_result.exit_code);
+                if !help_result.stderr.is_empty() {
+                    eprintln!("{}", help_result.stderr);
+                }
+            }
+
+            let sub = if subcommand.is_empty() {
+                help_info
+                    .first_list_subcommand()
+                    .map(|s| vec![s.to_string()])
+                    .unwrap_or_default()
+            } else {
+                subcommand
+            };
+
+            let schema_result =
+                runner::run(&binary, &["schema"], std::time::Duration::from_secs(5));
+            let schema_json: Option<serde_json::Value> =
+                serde_json::from_str(&schema_result.stdout).ok();
+
+            eprintln!(
+                "Detected {} flags, {} subcommands",
+                help_info.flags.len(),
+                help_info.subcommands.len()
+            );
+
+            if help_info.has_flag("--json") {
+                eprintln!("Tool supports --json");
+            }
+
+            let ctx = checks::CheckContext {
+                binary,
+                subcommand: sub,
+                help_text: help_info.raw,
+                schema_json,
+            };
+
+            let principles = vec![
+                checks::output::check(&ctx),
+                checks::schema::check(&ctx),
+                checks::streams::check(&ctx),
+                checks::interactive::check(&ctx),
+                checks::idempotent::check(&ctx),
+                checks::bounded::check(&ctx),
+            ];
+
+            let score: u32 = principles.iter().map(|p| p.score).sum();
+            let max: u32 = principles.iter().map(|p| p.max).sum();
+
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "tool": ctx.binary,
+                        "score": score,
+                        "max": max,
+                        "principles": principles,
+                    })
+                );
+            } else {
+                eprintln!("Score: {score}/{max}");
+            }
         }
         Commands::Schema => todo!(),
         Commands::Completions { shell } => {
