@@ -32,31 +32,48 @@ fn discover_subcommand(
     help_text: &str,
     schema_json: &Option<serde_json::Value>,
 ) -> Vec<String> {
-    // Try schema first — find a non-mutating command
+    // Try schema first — prefer a non-mutating "list" command, fall back to any non-mutating
     if let Some(schema) = schema_json
         && let Some(commands) = schema.get("commands")
     {
-        // Schema commands can be an object (flat "space list" keys) or array
-        if let Some(obj) = commands.as_object() {
-            for (name, cmd) in obj {
-                let is_mutating = cmd
-                    .get("mutating")
-                    .and_then(|m| m.as_bool())
-                    .unwrap_or(false);
-                if !is_mutating {
-                    return name.split_whitespace().map(|s| s.to_string()).collect();
-                }
-            }
+        let mut fallback: Option<Vec<String>> = None;
+
+        let entries: Vec<(String, &serde_json::Value)> = if let Some(obj) = commands.as_object() {
+            obj.iter().map(|(k, v)| (k.clone(), v)).collect()
         } else if let Some(arr) = commands.as_array() {
-            for cmd in arr {
-                let is_mutating = cmd
-                    .get("mutating")
-                    .and_then(|m| m.as_bool())
-                    .unwrap_or(false);
-                if !is_mutating && let Some(name) = cmd.get("name").and_then(|n| n.as_str()) {
-                    return name.split_whitespace().map(|s| s.to_string()).collect();
+            arr.iter()
+                .filter_map(|v| {
+                    v.get("name")
+                        .and_then(|n| n.as_str())
+                        .map(|n| (n.to_string(), v))
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        for (name, cmd) in &entries {
+            let is_mutating = cmd
+                .get("mutating")
+                .and_then(|m| m.as_bool())
+                .unwrap_or(false);
+            if !is_mutating {
+                let parts: Vec<String> = name.split_whitespace().map(|s| s.to_string()).collect();
+                // Prefer simple "noun list" commands (2 parts)
+                if let Some(last) = parts.last()
+                    && (last == "list" || last == "ls")
+                    && parts.len() == 2
+                {
+                    return parts;
+                }
+                if fallback.is_none() {
+                    fallback = Some(parts);
                 }
             }
+        }
+
+        if let Some(fb) = fallback {
+            return fb;
         }
     }
 
