@@ -1,7 +1,6 @@
 pub struct HelpInfo {
     pub flags: Vec<String>,
     pub subcommands: Vec<String>,
-    pub raw: String,
 }
 
 pub fn parse_help(help_text: &str) -> HelpInfo {
@@ -37,11 +36,7 @@ pub fn parse_help(help_text: &str) -> HelpInfo {
         }
     }
 
-    HelpInfo {
-        flags,
-        subcommands,
-        raw: help_text.to_string(),
-    }
+    HelpInfo { flags, subcommands }
 }
 
 impl HelpInfo {
