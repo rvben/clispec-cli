@@ -41,9 +41,6 @@ pub fn print_score(score: &Score, json: bool) {
     );
     eprintln!("  Spec: https://clispec.dev");
     eprintln!();
-
-    // JSON to stdout for piping
-    println!("{}", serde_json::to_string(score).expect("serialize"));
 }
 
 fn render_bar(score: u32, max: u32) -> String {

@@ -27,6 +27,72 @@ impl Score {
     }
 }
 
+fn discover_subcommand(
+    binary: &str,
+    help_text: &str,
+    schema_json: &Option<serde_json::Value>,
+) -> Vec<String> {
+    // Try schema first — find a non-mutating command
+    if let Some(schema) = schema_json
+        && let Some(commands) = schema.get("commands")
+    {
+        // Schema commands can be an object (flat "space list" keys) or array
+        if let Some(obj) = commands.as_object() {
+            for (name, cmd) in obj {
+                let is_mutating = cmd
+                    .get("mutating")
+                    .and_then(|m| m.as_bool())
+                    .unwrap_or(false);
+                if !is_mutating {
+                    return name.split_whitespace().map(|s| s.to_string()).collect();
+                }
+            }
+        } else if let Some(arr) = commands.as_array() {
+            for cmd in arr {
+                let is_mutating = cmd
+                    .get("mutating")
+                    .and_then(|m| m.as_bool())
+                    .unwrap_or(false);
+                if !is_mutating && let Some(name) = cmd.get("name").and_then(|n| n.as_str()) {
+                    return name.split_whitespace().map(|s| s.to_string()).collect();
+                }
+            }
+        }
+    }
+
+    // Try top-level help for direct list/status commands
+    let help_info = help::parse_help(help_text);
+    if let Some(sub) = help_info.first_list_subcommand() {
+        return vec![sub.to_string()];
+    }
+
+    // Try nested subcommands — look for "noun list" patterns
+    // Extract candidate nouns from help (words that appear as subcommands)
+    let nouns: Vec<&str> = help_text
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            // Lines that look like "  noun   Description" in help
+            if trimmed.starts_with(char::is_alphabetic) {
+                trimmed.split_whitespace().next()
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for noun in &nouns {
+        for verb in &["list", "ls", "status"] {
+            let result = runner::run(binary, &[noun, verb, "--help"], Duration::from_secs(3));
+            if result.exit_code == 0 {
+                return vec![noun.to_string(), verb.to_string()];
+            }
+        }
+    }
+
+    vec![]
+}
+
 pub fn score(binary: &str, subcommand: &[String]) -> Score {
     let path = which::which(binary)
         .map(|p| p.to_string_lossy().to_string())
@@ -43,11 +109,7 @@ pub fn score(binary: &str, subcommand: &[String]) -> Score {
     let schema_json: Option<serde_json::Value> = serde_json::from_str(&schema_result.stdout).ok();
 
     let subcommand = if subcommand.is_empty() {
-        let help_info = help::parse_help(&help_text);
-        help_info
-            .first_list_subcommand()
-            .map(|s| vec![s.to_string()])
-            .unwrap_or_default()
+        discover_subcommand(binary, &help_text, &schema_json)
     } else {
         subcommand.to_vec()
     };
