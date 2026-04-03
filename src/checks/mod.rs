@@ -107,13 +107,24 @@ mod tests {
     }
 
     #[test]
-    fn all_stubs_return_zero_score() {
+    fn checks_return_correct_max_scores() {
         let ctx = test_context();
-        assert_eq!(output::check(&ctx).score, 0);
-        assert_eq!(schema::check(&ctx).score, 0);
-        assert_eq!(streams::check(&ctx).score, 0);
-        assert_eq!(interactive::check(&ctx).score, 0);
-        assert_eq!(idempotent::check(&ctx).score, 0);
-        assert_eq!(bounded::check(&ctx).score, 0);
+        assert_eq!(output::check(&ctx).max, 5);
+        assert_eq!(schema::check(&ctx).max, 5);
+        assert_eq!(streams::check(&ctx).max, 2);
+        assert_eq!(interactive::check(&ctx).max, 3);
+        assert_eq!(idempotent::check(&ctx).max, 2);
+        assert_eq!(bounded::check(&ctx).max, 3);
+    }
+
+    #[test]
+    fn checks_produce_expected_number_of_results() {
+        let ctx = test_context();
+        assert_eq!(output::check(&ctx).checks.len(), 5);
+        assert_eq!(schema::check(&ctx).checks.len(), 5);
+        assert_eq!(streams::check(&ctx).checks.len(), 2);
+        assert_eq!(interactive::check(&ctx).checks.len(), 3);
+        assert_eq!(idempotent::check(&ctx).checks.len(), 2);
+        assert_eq!(bounded::check(&ctx).checks.len(), 3);
     }
 }
