@@ -2,6 +2,7 @@ mod checks;
 mod display;
 mod help;
 mod runner;
+mod schema_cmd;
 mod scorer;
 
 use clap::{CommandFactory, Parser, Subcommand};
@@ -43,7 +44,7 @@ fn main() {
             let result = scorer::score(&binary, &subcommand);
             display::print_score(&result, cli.json);
         }
-        Commands::Schema => todo!(),
+        Commands::Schema => schema_cmd::print_schema(),
         Commands::Completions { shell } => {
             clap_complete::generate(
                 shell,
