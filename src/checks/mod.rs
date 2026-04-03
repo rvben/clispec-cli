@@ -67,6 +67,21 @@ pub struct CheckContext {
     pub schema_json: Option<serde_json::Value>,
 }
 
+/// Run `binary subcommand... --help` and parse the help output.
+/// Returns `None` if the subcommand is empty or the command fails.
+pub fn subcommand_help_info(ctx: &CheckContext) -> Option<crate::help::HelpInfo> {
+    if ctx.subcommand.is_empty() {
+        return None;
+    }
+    let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
+    args.push("--help");
+    let result = crate::runner::run(&ctx.binary, &args, std::time::Duration::from_secs(5));
+    if result.exit_code < 0 {
+        return None;
+    }
+    Some(crate::help::parse_help(&result.stdout))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,11 +8,20 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let help_info = help::parse_help(&ctx.help_text);
     let mut checks = Vec::new();
 
+    let sub_help_info = super::subcommand_help_info(ctx);
+
     // Check 1: JSON output flag in help (--json, --output, -o, --format)
+    // Check both top-level and subcommand help
     let has_json_flag = help_info.has_flag("--json")
         || help_info.has_flag("--output")
         || help_info.has_flag("--format")
-        || help_info.has_flag("-o");
+        || help_info.has_flag("-o")
+        || sub_help_info.as_ref().is_some_and(|h| {
+            h.has_flag("--json")
+                || h.has_flag("--output")
+                || h.has_flag("--format")
+                || h.has_flag("-o")
+        });
     checks.push(if has_json_flag {
         CheckResult::pass("JSON output flag")
     } else {
@@ -89,14 +98,17 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         CheckResult::fail("Structured errors")
     });
 
-    // Check 5: --quiet or -q flag
-    checks.push(
-        if help_info.has_flag("--quiet") || help_info.has_flag("-q") {
-            CheckResult::pass("--quiet flag")
-        } else {
-            CheckResult::fail("--quiet flag")
-        },
-    );
+    // Check 5: --quiet or -q flag (top-level or subcommand)
+    let has_quiet = help_info.has_flag("--quiet")
+        || help_info.has_flag("-q")
+        || sub_help_info
+            .as_ref()
+            .is_some_and(|h| h.has_flag("--quiet") || h.has_flag("-q"));
+    checks.push(if has_quiet {
+        CheckResult::pass("--quiet flag")
+    } else {
+        CheckResult::fail("--quiet flag")
+    });
 
     PrincipleScore::new("Structured Output", checks, 5)
 }
