@@ -263,13 +263,18 @@ jobs:
           sed -i "s/SHA_AARCH64_UNKNOWN_LINUX_GNU/${{ steps.hashes.outputs.aarch64_unknown_linux_gnu }}/g" /tmp/clispec.rb
           sed -i "s/SHA_X86_64_UNKNOWN_LINUX_GNU/${{ steps.hashes.outputs.x86_64_unknown_linux_gnu }}/g" /tmp/clispec.rb
 
-          # Clone tap repo, update formula, push
-          git clone https://rvben:${GH_TOKEN}@github.com/rvben/homebrew-tap.git /tmp/tap
-          mkdir -p /tmp/tap/Formula
-          cp /tmp/clispec.rb /tmp/tap/Formula/clispec.rb
-          cd /tmp/tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/clispec.rb
-          git diff --cached --quiet || git commit -m "Update clispec to ${VERSION}"
-          git push
+          # Push formula via GitHub API
+          CONTENT=$(base64 -w0 /tmp/clispec.rb)
+          EXISTING=$(curl -s -H "Authorization: token ${GH_TOKEN}" \
+            https://api.github.com/repos/rvben/homebrew-tap/contents/Formula/clispec.rb \
+            | jq -r '.sha // empty')
+
+          if [ -n "$EXISTING" ]; then
+            curl -s -X PUT -H "Authorization: token ${GH_TOKEN}" \
+              https://api.github.com/repos/rvben/homebrew-tap/contents/Formula/clispec.rb \
+              -d "{\"message\":\"Update clispec to ${VERSION}\",\"content\":\"${CONTENT}\",\"sha\":\"${EXISTING}\"}"
+          else
+            curl -s -X PUT -H "Authorization: token ${GH_TOKEN}" \
+              https://api.github.com/repos/rvben/homebrew-tap/contents/Formula/clispec.rb \
+              -d "{\"message\":\"Update clispec to ${VERSION}\",\"content\":\"${CONTENT}\"}"
+          fi
