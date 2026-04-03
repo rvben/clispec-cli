@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+
+## [0.1.2](https://github.com/rvben/clispec-cli/compare/v0.1.1...v0.1.2) - 2026-04-03
+
+### Added
+
+- add PyPI publishing via maturin ([1f86828](https://github.com/rvben/clispec-cli/commit/1f86828698e3b209f792e9199a9a62452dc92da6))
+
 ## [0.1.1] - 2026-04-03
 
 ### Added
