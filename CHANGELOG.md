@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.1.4](https://github.com/rvben/clispec-cli/compare/v0.1.3...v0.1.4) - 2026-04-03
+
+### Fixed
+
+- check subcommand help for flags, probe init command directly ([b145038](https://github.com/rvben/clispec-cli/commit/b1450385432073da53f197e6f75c8a823920248d))
+
 ## [0.1.3](https://github.com/rvben/clispec-cli/compare/v0.1.2...v0.1.3) - 2026-04-03
 
 ### Fixed
