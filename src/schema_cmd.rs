@@ -44,9 +44,29 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
             if !args.is_empty() {
                 entry["args"] = json!(args);
             }
+            if let Some(fields) = output_fields_for(c.get_name()) {
+                entry["output_fields"] = fields;
+            }
             entry
         })
         .collect()
+}
+
+fn output_fields_for(command: &str) -> Option<Value> {
+    match command {
+        "score" => Some(json!([
+            {"name": "tool", "type": "string"},
+            {"name": "path", "type": "string"},
+            {"name": "score", "type": "integer"},
+            {"name": "max", "type": "integer"},
+            {"name": "percentage", "type": "integer"},
+            {"name": "grade", "type": "string",
+             "description": "Excellent | Good | Fair | Needs Work"},
+            {"name": "principles", "type": "object[]",
+             "description": "Per-principle scores with per-check breakdown"}
+        ])),
+        _ => None,
+    }
 }
 
 fn arg_type(arg: &clap::Arg) -> &'static str {
