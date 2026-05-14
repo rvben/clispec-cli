@@ -149,11 +149,7 @@ pub fn score(binary: &str, subcommand: &[String]) -> Score {
 
     let total_score: u32 = principles.iter().map(|p| p.score).sum();
     let max: u32 = principles.iter().map(|p| p.max).sum();
-    let percentage = if max > 0 {
-        (total_score * 100) / max
-    } else {
-        0
-    };
+    let percentage = (total_score * 100).checked_div(max).unwrap_or(0);
 
     Score {
         tool: binary.to_string(),
