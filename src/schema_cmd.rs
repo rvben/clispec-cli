@@ -31,6 +31,7 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
                 .map(|a| {
                     json!({
                         "name": a.get_long().map(|l| format!("--{l}")).unwrap_or_else(|| a.get_id().to_string()),
+                        "type": arg_type(a),
                         "required": a.is_required_set(),
                     })
                 })
@@ -46,4 +47,14 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
             entry
         })
         .collect()
+}
+
+fn arg_type(arg: &clap::Arg) -> &'static str {
+    use clap::ArgAction;
+    match arg.get_action() {
+        ArgAction::SetTrue | ArgAction::SetFalse => "boolean",
+        ArgAction::Count => "integer",
+        ArgAction::Append => "string[]",
+        _ => "string",
+    }
 }
