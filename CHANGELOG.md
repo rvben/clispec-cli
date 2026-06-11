@@ -9,6 +9,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.1](https://github.com/rvben/clispec-cli/compare/v0.2.0...v0.2.1) - 2026-06-11
+
+### Added
+
+- **checks**: accept bypass flag declared in schema args ([5ea9af3](https://github.com/rvben/clispec-cli/commit/5ea9af362561a75615e114892309b5128f6cd299))
+
+### Fixed
+
+- **checks**: drop init-command check and accept promptless tools for --yes ([c7d0219](https://github.com/rvben/clispec-cli/commit/c7d0219f69de27ee51570962f9eb442fc1ad140a))
+
 ## [0.2.0](https://github.com/rvben/clispec-cli/compare/v0.1.5...v0.2.0) - 2026-06-11
 
 ### Added
