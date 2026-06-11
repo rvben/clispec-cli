@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.0](https://github.com/rvben/clispec-cli/compare/v0.1.5...v0.2.0) - 2026-06-11
+
+### Added
+
+- score against spec v0.2 ([42f26d5](https://github.com/rvben/clispec-cli/commit/42f26d56fbe9682e2a01e308a0e92f97b94b031e))
+- **schema_cmd**: declare output_fields for score command ([8de7a63](https://github.com/rvben/clispec-cli/commit/8de7a63f75987626d7d2dc9c3723942895098e4d))
+- **schema**: validate target output against bundled clispec v0.1 schema ([ccef4c1](https://github.com/rvben/clispec-cli/commit/ccef4c1195da1a4a2e7188e51ebe299d10d6b22e))
+
+### Fixed
+
+- **checks**: accept empty global_args and require non-empty text output ([27262b2](https://github.com/rvben/clispec-cli/commit/27262b2b1232f42ea57dc2e1ccbd71bfa172eae9))
+- **schema_cmd**: emit type field for args in self-described schema ([0967e04](https://github.com/rvben/clispec-cli/commit/0967e04c82254040729ea5dffc26b4c428fc9e34))
+- **scorer**: use checked_div for percentage calculation ([742c6ed](https://github.com/rvben/clispec-cli/commit/742c6ed1ed1c579f4890a4edcf9b1a5b0019a8f5))
+- revert to standard x-access-token git clone for homebrew ([2929826](https://github.com/rvben/clispec-cli/commit/2929826aea73dc3cbd00ba99b0f8b5a4072b0bc2))
+- use GitHub API instead of git push for homebrew formula updates ([29db86f](https://github.com/rvben/clispec-cli/commit/29db86f933774b0913304d0a0efd39aa26546020))
+- use username:token format for homebrew tap push ([7f6f948](https://github.com/rvben/clispec-cli/commit/7f6f948cfadc3fb708d7b45eaeefca152f0cb28d))
+
 ## [0.1.5](https://github.com/rvben/clispec-cli/compare/v0.1.4...v0.1.5) - 2026-04-03
 
 ### Fixed
