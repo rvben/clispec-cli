@@ -11,6 +11,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.3](https://github.com/rvben/clispec-cli/compare/v0.2.2...v0.2.3) - 2026-06-11
+
+### Added
+
+- **checks**: cite the conformance checklist item behind every check ([e8e9b5d](https://github.com/rvben/clispec-cli/commit/e8e9b5db819f3b29cce2b548670d4e056ad44291))
+
 ## [0.2.2](https://github.com/rvben/clispec-cli/compare/v0.2.1...v0.2.2) - 2026-06-11
 
 ### Added
