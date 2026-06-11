@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(output::check(&ctx).max, 5);
         assert_eq!(schema::check(&ctx).max, 10);
         assert_eq!(streams::check(&ctx).max, 2);
-        assert_eq!(interactive::check(&ctx).max, 3);
+        assert_eq!(interactive::check(&ctx).max, 2);
         assert_eq!(idempotent::check(&ctx).max, 2);
         assert_eq!(bounded::check(&ctx).max, 3);
     }
@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(output::check(&ctx).checks.len(), 5);
         assert_eq!(schema::check(&ctx).checks.len(), 10);
         assert_eq!(streams::check(&ctx).checks.len(), 2);
-        assert_eq!(interactive::check(&ctx).checks.len(), 3);
+        assert_eq!(interactive::check(&ctx).checks.len(), 2);
         assert_eq!(idempotent::check(&ctx).checks.len(), 2);
         assert_eq!(bounded::check(&ctx).checks.len(), 3);
     }

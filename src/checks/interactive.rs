@@ -18,35 +18,33 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         CheckResult::fail("No TTY hang")
     });
 
-    // Check 2: --yes or --force flag (check both top-level and subcommand help)
+    // Check 2: --yes or --force flag (check both top-level and subcommand help).
+    // The spec requires a flag alternative for every interactive prompt; a tool
+    // whose schema declares no mutating commands has nothing to confirm, so the
+    // requirement is vacuously satisfied.
     let has_yes_or_force = help_info.has_flag("--yes")
         || help_info.has_flag("--force")
         || sub_help_info
             .as_ref()
             .is_some_and(|h| h.has_flag("--yes") || h.has_flag("--force"));
-    checks.push(if has_yes_or_force {
+    let no_mutating_commands = ctx
+        .schema_json
+        .as_ref()
+        .and_then(|s| s.get("commands"))
+        .and_then(|c| c.as_array())
+        .is_some_and(|cmds| {
+            !cmds.is_empty()
+                && cmds.iter().all(|c| {
+                    c.get("mutating")
+                        .and_then(serde_json::Value::as_bool)
+                        .is_some_and(|m| !m)
+                })
+        });
+    checks.push(if has_yes_or_force || no_mutating_commands {
         CheckResult::pass("--yes flag")
     } else {
         CheckResult::fail("--yes flag")
     });
 
-    // Check 3: init command exists
-    // Check top-level help, then probe `binary init --help` and `binary config init --help`
-    let has_init = help_info.has_subcommand("init")
-        || help_info.has_subcommand("config init")
-        || probe_command_exists(&ctx.binary, &["init", "--help"])
-        || probe_command_exists(&ctx.binary, &["config", "init", "--help"]);
-    checks.push(if has_init {
-        CheckResult::pass("init command")
-    } else {
-        CheckResult::fail("init command")
-    });
-
-    PrincipleScore::new("Non-Interactive", checks, 3)
-}
-
-/// Probe whether a command exists by running it and checking for exit code 0.
-fn probe_command_exists(binary: &str, args: &[&str]) -> bool {
-    let result = runner::run(binary, args, Duration::from_secs(5));
-    result.exit_code == 0
+    PrincipleScore::new("Non-Interactive", checks, 2)
 }
