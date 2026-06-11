@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use super::{CheckContext, CheckResult, PrincipleScore};
 
-/// The canonical clispec v0.1 schema, vendored from clispec.dev/schema/v0.1.json.
-const CLISPEC_SCHEMA_V0_1: &str = include_str!("../../schemas/v0.1.json");
+/// The canonical clispec v0.2 schema, vendored from clispec.dev/schema/v0.2.json.
+/// v0.2 is additive over v0.1, so v0.1-shaped documents validate too.
+const CLISPEC_SCHEMA_V0_2: &str = include_str!("../../schemas/v0.2.json");
 
 pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let mut checks = Vec::new();
@@ -28,13 +29,13 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     });
 
     if let Some(ref s) = schema {
-        // Check 3: Validates against clispec v0.1 JSON Schema
-        checks.push(match validate_against_clispec_v0_1(s) {
-            Ok(()) => CheckResult::pass("Validates against clispec v0.1"),
-            Err(detail) => CheckResult::fail_with("Validates against clispec v0.1", &detail),
+        // Check 3: Validates against clispec v0.2 JSON Schema
+        checks.push(match validate_against_clispec_v0_2(s) {
+            Ok(()) => CheckResult::pass("Validates against clispec v0.2"),
+            Err(detail) => CheckResult::fail_with("Validates against clispec v0.2", &detail),
         });
 
-        // Check 4: Has errors with kind/retryable
+        // Check 4: Has errors with kind
         let has_errors = s
             .get("errors")
             .and_then(|e| e.as_array())
@@ -63,19 +64,74 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         } else {
             CheckResult::fail("Output fields declared")
         });
+
+        // Check 6: Global args declared at the top level
+        let has_global_args = s
+            .get("global_args")
+            .and_then(|g| g.as_array())
+            .is_some_and(|arr| !arr.is_empty());
+        checks.push(if has_global_args {
+            CheckResult::pass("Global args declared")
+        } else {
+            CheckResult::fail("Global args declared")
+        });
+
+        // Check 7: Every error kind maps to an exit code
+        checks.push(match exit_code_coverage(s) {
+            ExitCodeCoverage::Full => CheckResult::pass("Exit codes on error kinds"),
+            ExitCodeCoverage::NoErrors => {
+                CheckResult::fail_with("Exit codes on error kinds", "no error kinds declared")
+            }
+            ExitCodeCoverage::Partial { missing, total } => CheckResult::fail_with(
+                "Exit codes on error kinds",
+                &format!("{missing} of {total} error kinds missing exit_code"),
+            ),
+        });
+
+        // Check 8: Every leaf command carries an explicit mutating marker
+        // (the spec defines absence as unknown, not read-only)
+        checks.push(match mutating_coverage(s) {
+            MutatingCoverage::Full => CheckResult::pass("Mutation markers on all commands"),
+            MutatingCoverage::NoCommands => {
+                CheckResult::fail_with("Mutation markers on all commands", "no commands declared")
+            }
+            MutatingCoverage::Partial { missing, total } => CheckResult::fail_with(
+                "Mutation markers on all commands",
+                &format!("{missing} of {total} commands missing mutating"),
+            ),
+        });
     } else {
-        checks.push(CheckResult::fail("Validates against clispec v0.1"));
+        checks.push(CheckResult::fail("Validates against clispec v0.2"));
         checks.push(CheckResult::fail("Error kinds documented"));
         checks.push(CheckResult::fail("Output fields declared"));
+        checks.push(CheckResult::fail("Global args declared"));
+        checks.push(CheckResult::fail("Exit codes on error kinds"));
+        checks.push(CheckResult::fail("Mutation markers on all commands"));
     }
 
-    PrincipleScore::new("Schema Introspection", checks, 5)
+    // Check 9: schema is discoverable from root --help
+    checks.push(if ctx.help_text.to_lowercase().contains("schema") {
+        CheckResult::pass("schema mentioned in --help")
+    } else {
+        CheckResult::fail("schema mentioned in --help")
+    });
+
+    // Check 10: schema works without configuration (HOME pointed at an
+    // empty directory; auth tokens inherited from the real env are an
+    // accepted blind spot of this probe)
+    checks.push(if schema_works_without_config(&ctx.binary) {
+        CheckResult::pass("schema works without config")
+    } else {
+        CheckResult::fail("schema works without config")
+    });
+
+    PrincipleScore::new("Schema Introspection", checks, 10)
 }
 
-/// Validate an instance against the bundled clispec v0.1 JSON Schema.
+/// Validate an instance against the bundled clispec v0.2 JSON Schema.
 /// Returns Ok on success, or Err with the first validation error message.
-fn validate_against_clispec_v0_1(instance: &serde_json::Value) -> Result<(), String> {
-    let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_1)
+fn validate_against_clispec_v0_2(instance: &serde_json::Value) -> Result<(), String> {
+    let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_2)
         .expect("bundled clispec schema must be valid JSON");
     let validator = jsonschema::draft202012::new(&schema)
         .map_err(|e| format!("bundled schema is not a valid Draft 2020-12 schema: {e}"))?;
@@ -83,6 +139,95 @@ fn validate_against_clispec_v0_1(instance: &serde_json::Value) -> Result<(), Str
         None => Ok(()),
         Some(err) => Err(format!("{}: {}", err.instance_path(), err)),
     }
+}
+
+enum ExitCodeCoverage {
+    Full,
+    NoErrors,
+    Partial { missing: u32, total: u32 },
+}
+
+fn exit_code_coverage(schema: &serde_json::Value) -> ExitCodeCoverage {
+    let Some(errors) = schema.get("errors").and_then(|e| e.as_array()) else {
+        return ExitCodeCoverage::NoErrors;
+    };
+    if errors.is_empty() {
+        return ExitCodeCoverage::NoErrors;
+    }
+    let total = errors.len() as u32;
+    let missing = errors
+        .iter()
+        .filter(|e| !e.get("exit_code").is_some_and(|c| c.is_i64() || c.is_u64()))
+        .count() as u32;
+    if missing == 0 {
+        ExitCodeCoverage::Full
+    } else {
+        ExitCodeCoverage::Partial { missing, total }
+    }
+}
+
+enum MutatingCoverage {
+    Full,
+    NoCommands,
+    Partial { missing: u32, total: u32 },
+}
+
+fn mutating_coverage(schema: &serde_json::Value) -> MutatingCoverage {
+    fn walk(cmd: &serde_json::Value, total: &mut u32, missing: &mut u32) {
+        if let Some(subs) = cmd.get("subcommands").and_then(|s| s.as_array())
+            && !subs.is_empty()
+        {
+            for sub in subs {
+                walk(sub, total, missing);
+            }
+            return;
+        }
+        *total += 1;
+        if !cmd.get("mutating").is_some_and(|m| m.is_boolean()) {
+            *missing += 1;
+        }
+    }
+
+    let mut total = 0;
+    let mut missing = 0;
+    match schema.get("commands") {
+        Some(serde_json::Value::Array(arr)) => {
+            for cmd in arr {
+                walk(cmd, &mut total, &mut missing);
+            }
+        }
+        Some(serde_json::Value::Object(obj)) => {
+            for cmd in obj.values() {
+                walk(cmd, &mut total, &mut missing);
+            }
+        }
+        _ => {}
+    }
+
+    if total == 0 {
+        MutatingCoverage::NoCommands
+    } else if missing == 0 {
+        MutatingCoverage::Full
+    } else {
+        MutatingCoverage::Partial { missing, total }
+    }
+}
+
+/// Run `binary schema` with HOME and XDG_CONFIG_HOME pointed at an empty
+/// directory. The spec requires schema to work before any setup has happened.
+fn schema_works_without_config(binary: &str) -> bool {
+    let tmp = std::env::temp_dir().join(format!("clispec-noconfig-{}", std::process::id()));
+    if std::fs::create_dir_all(&tmp).is_err() {
+        return false;
+    }
+    let tmp = tmp.to_string_lossy();
+    let result = runner::run_with_env(
+        binary,
+        &["schema"],
+        Duration::from_secs(5),
+        &[("HOME", &tmp), ("XDG_CONFIG_HOME", &tmp)],
+    );
+    result.exit_code == 0 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
 }
 
 #[cfg(test)]
@@ -99,17 +244,19 @@ mod tests {
 
     #[test]
     fn bundled_schema_is_valid_draft_2020_12() {
-        let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_1).unwrap();
+        let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_2).unwrap();
         jsonschema::draft202012::new(&schema).expect("bundled schema must be valid");
     }
 
     #[test]
     fn minimal_document_validates() {
-        validate_against_clispec_v0_1(&minimal_valid()).expect("minimal doc should validate");
+        validate_against_clispec_v0_2(&minimal_valid()).expect("minimal doc should validate");
     }
 
     #[test]
-    fn rich_document_from_spec_validates() {
+    fn v0_1_shaped_document_still_validates() {
+        // The pre-v0.2 spec example: no clispec field, no global_args,
+        // no exit_code on errors. v0.2 is additive, so this must pass.
         let doc = serde_json::json!({
             "name": "mytool",
             "version": "1.2.0",
@@ -133,13 +280,33 @@ mod tests {
                 {"kind": "rate_limit", "retryable": true, "description": "Too many requests"}
             ]
         });
-        validate_against_clispec_v0_1(&doc).expect("spec example should validate");
+        validate_against_clispec_v0_2(&doc).expect("v0.1-shaped doc should validate");
+    }
+
+    #[test]
+    fn v0_2_spec_example_validates() {
+        let doc = serde_json::json!({
+            "clispec": "0.2",
+            "name": "mytool",
+            "version": "1.2.0",
+            "global_args": [
+                {"name": "--output", "type": "string",
+                 "enum": ["auto", "text", "json", "yaml"], "default": "auto"},
+                {"name": "--quiet", "type": "boolean", "default": false}
+            ],
+            "commands": [{ "name": "list", "mutating": false }],
+            "errors": [
+                {"kind": "auth", "exit_code": 3, "retryable": false},
+                {"kind": "not_found", "exit_code": 4, "retryable": false}
+            ]
+        });
+        validate_against_clispec_v0_2(&doc).expect("v0.2 spec example should validate");
     }
 
     #[test]
     fn missing_required_field_fails() {
         let doc = serde_json::json!({ "name": "mytool", "version": "1.0.0" });
-        validate_against_clispec_v0_1(&doc).expect_err("missing commands should fail");
+        validate_against_clispec_v0_2(&doc).expect_err("missing commands should fail");
     }
 
     #[test]
@@ -150,7 +317,7 @@ mod tests {
             "commands": [{ "name": "list" }],
             "errors": [{ "kind": "Not-Found" }]
         });
-        validate_against_clispec_v0_1(&doc).expect_err("non-snake_case kind should fail");
+        validate_against_clispec_v0_2(&doc).expect_err("non-snake_case kind should fail");
     }
 
     #[test]
@@ -161,6 +328,62 @@ mod tests {
             "commands": [{ "name": "list", "x_custom": "anything" }],
             "x_tool_metadata": { "vendor": "acme" }
         });
-        validate_against_clispec_v0_1(&doc).expect("extensions should validate");
+        validate_against_clispec_v0_2(&doc).expect("extensions should validate");
+    }
+
+    #[test]
+    fn exit_code_coverage_full_partial_none() {
+        let full = serde_json::json!({"errors": [
+            {"kind": "auth", "exit_code": 3},
+            {"kind": "not_found", "exit_code": 4}
+        ]});
+        assert!(matches!(exit_code_coverage(&full), ExitCodeCoverage::Full));
+
+        let partial = serde_json::json!({"errors": [
+            {"kind": "auth", "exit_code": 3},
+            {"kind": "not_found"}
+        ]});
+        assert!(matches!(
+            exit_code_coverage(&partial),
+            ExitCodeCoverage::Partial {
+                missing: 1,
+                total: 2
+            }
+        ));
+
+        let none = serde_json::json!({"name": "mytool"});
+        assert!(matches!(
+            exit_code_coverage(&none),
+            ExitCodeCoverage::NoErrors
+        ));
+    }
+
+    #[test]
+    fn mutating_coverage_counts_leaves_recursively() {
+        let doc = serde_json::json!({"commands": [
+            {"name": "list", "mutating": false},
+            {"name": "apps", "subcommands": [
+                {"name": "deploy", "mutating": true},
+                {"name": "status"}
+            ]}
+        ]});
+        assert!(matches!(
+            mutating_coverage(&doc),
+            MutatingCoverage::Partial {
+                missing: 1,
+                total: 3
+            }
+        ));
+
+        let full = serde_json::json!({"commands": [
+            {"name": "list", "mutating": false}
+        ]});
+        assert!(matches!(mutating_coverage(&full), MutatingCoverage::Full));
+
+        let none = serde_json::json!({"name": "mytool"});
+        assert!(matches!(
+            mutating_coverage(&none),
+            MutatingCoverage::NoCommands
+        ));
     }
 }

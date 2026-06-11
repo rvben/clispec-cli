@@ -79,36 +79,95 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         ));
     }
 
-    // Check 4: Structured errors on stderr
+    // Check 4: Structured errors on stderr (the envelope is the last
+    // line of stderr per the spec; whole-stderr JSON is also accepted)
     let bad_result = runner::run(
         &ctx.binary,
         &["__nonexistent_command__"],
         Duration::from_secs(5),
     );
-    let stderr_json = serde_json::from_str::<serde_json::Value>(&bad_result.stderr);
-    let has_kind = stderr_json
-        .as_ref()
-        .ok()
-        .and_then(|v| v.get("error"))
-        .and_then(|e| e.get("kind"))
-        .is_some();
-    checks.push(if has_kind {
+    checks.push(if stderr_has_error_envelope(&bad_result.stderr) {
         CheckResult::pass("Structured errors")
     } else {
         CheckResult::fail("Structured errors")
     });
 
-    // Check 5: --quiet or -q flag (top-level or subcommand)
-    let has_quiet = help_info.has_flag("--quiet")
-        || help_info.has_flag("-q")
-        || sub_help_info
-            .as_ref()
-            .is_some_and(|h| h.has_flag("--quiet") || h.has_flag("-q"));
-    checks.push(if has_quiet {
-        CheckResult::pass("--quiet flag")
+    // Check 5: Explicit format selection wins over TTY detection
+    // (stdout is piped here, so `-o text` must still produce text)
+    if !ctx.subcommand.is_empty() {
+        let text_flags: &[&[&str]] = &[
+            &["-o", "text"],
+            &["--output", "text"],
+            &["--format", "text"],
+        ];
+        let mut honored = false;
+        for flags in text_flags {
+            let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
+            args.extend_from_slice(flags);
+            let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+            if result.exit_code == 0
+                && serde_json::from_str::<serde_json::Value>(&result.stdout).is_err()
+            {
+                honored = true;
+                break;
+            }
+        }
+        checks.push(if honored {
+            CheckResult::pass("Explicit format wins")
+        } else {
+            CheckResult::fail("Explicit format wins")
+        });
     } else {
-        CheckResult::fail("--quiet flag")
-    });
+        checks.push(CheckResult::fail_with(
+            "Explicit format wins",
+            "no subcommand to test",
+        ));
+    }
 
     PrincipleScore::new("Structured Output", checks, 5)
+}
+
+/// True when stderr carries a structured error envelope with a `kind`,
+/// either as its last non-empty line (the spec rule) or as the whole stream.
+fn stderr_has_error_envelope(stderr: &str) -> bool {
+    let has_kind = |v: &serde_json::Value| {
+        v.get("error")
+            .and_then(|e| e.get("kind"))
+            .is_some_and(|k| k.is_string())
+    };
+    if let Some(last_line) = stderr.lines().rev().find(|l| !l.trim().is_empty())
+        && serde_json::from_str::<serde_json::Value>(last_line).is_ok_and(|v| has_kind(&v))
+    {
+        return true;
+    }
+    serde_json::from_str::<serde_json::Value>(stderr).is_ok_and(|v| has_kind(&v))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn envelope_on_last_line_after_progress() {
+        let stderr = "Fetching services...\ndone.\n{\"error\": {\"kind\": \"auth\", \"message\": \"expired\"}}\n";
+        assert!(stderr_has_error_envelope(stderr));
+    }
+
+    #[test]
+    fn whole_stderr_envelope_accepted() {
+        let stderr = "{\n  \"error\": {\n    \"kind\": \"auth\"\n  }\n}\n";
+        assert!(stderr_has_error_envelope(stderr));
+    }
+
+    #[test]
+    fn prose_only_stderr_rejected() {
+        assert!(!stderr_has_error_envelope("Error: something went wrong\n"));
+        assert!(!stderr_has_error_envelope(""));
+    }
+
+    #[test]
+    fn envelope_without_kind_rejected() {
+        let stderr = "{\"error\": {\"message\": \"expired\"}}\n";
+        assert!(!stderr_has_error_envelope(stderr));
+    }
 }

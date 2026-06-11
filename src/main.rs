@@ -41,6 +41,17 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Score { binary, subcommand } => {
+            if which::which(&binary).is_err() {
+                let error = serde_json::json!({
+                    "error": {
+                        "kind": "not_found",
+                        "message": format!("'{binary}' not found on PATH"),
+                        "hint": "Provide a binary name on PATH or a path to an executable."
+                    }
+                });
+                eprintln!("{error}");
+                std::process::exit(3);
+            }
             let result = scorer::score(&binary, &subcommand);
             display::print_score(&result, cli.json);
         }

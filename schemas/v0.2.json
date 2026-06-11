@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://clispec.dev/schema/v0.1.json",
-  "title": "The CLI Spec — Schema v0.1",
+  "$id": "https://clispec.dev/schema/v0.2.json",
+  "title": "The CLI Spec - Schema v0.2",
   "description": "Machine-readable description of a CLI tool that conforms to The CLI Spec (https://clispec.dev). Emitted to stdout by the tool's `schema` subcommand.",
   "type": "object",
   "required": ["name", "version", "commands"],
@@ -24,6 +24,11 @@
     "description": {
       "type": "string"
     },
+    "global_args": {
+      "description": "Arguments accepted by every command (e.g. --output, --quiet, --profile). Listed once here instead of being repeated or omitted per command.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/arg" }
+    },
     "commands": {
       "description": "Commands the tool exposes. Subcommands nest via the `subcommands` field.",
       "type": "array",
@@ -43,9 +48,8 @@
         "name": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
         "mutating": {
-          "description": "Whether the command modifies state. Defaults to false.",
-          "type": "boolean",
-          "default": false
+          "description": "Whether the command modifies state. Omitted means unknown - consumers MUST NOT assume an unmarked command is read-only. `mutating: false` is a contract: consumers may grant trust (e.g. auto-approval) based on it.",
+          "type": "boolean"
         },
         "stability": {
           "description": "Stability of the command's contract.",
@@ -57,7 +61,7 @@
           "items": { "$ref": "#/$defs/arg" }
         },
         "output_fields": {
-          "description": "Fields present in the command's structured output, so consumers know the shape without invoking the command.",
+          "description": "Fields present in the command's structured output, so consumers know the shape without invoking the command. For list commands, these describe one item of the `items` array, not the envelope.",
           "type": "array",
           "items": { "$ref": "#/$defs/field" }
         },
@@ -111,6 +115,12 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "exit_code": {
+          "description": "The exit code the tool returns for this error kind. Consumers can branch on the exit code without parsing stderr.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
         },
         "retryable": {
           "description": "Whether a consumer should retry on this error.",

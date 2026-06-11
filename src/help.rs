@@ -1,6 +1,8 @@
 pub struct HelpInfo {
     pub flags: Vec<String>,
     pub subcommands: Vec<String>,
+    /// Subcommand names parsed from a "Commands:" help section, in order.
+    pub listed_subcommands: Vec<String>,
 }
 
 pub fn parse_help(help_text: &str) -> HelpInfo {
@@ -36,7 +38,47 @@ pub fn parse_help(help_text: &str) -> HelpInfo {
         }
     }
 
-    HelpInfo { flags, subcommands }
+    HelpInfo {
+        flags,
+        subcommands,
+        listed_subcommands: parse_command_section(help_text),
+    }
+}
+
+/// Parse subcommand names from a "Commands:" / "Subcommands:" / "Available
+/// Commands:" section (the clap, click, and cobra layouts): indented lines
+/// whose first word is the command name. The section ends at the next
+/// un-indented line (the next section header).
+fn parse_command_section(help_text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut in_section = false;
+
+    for line in help_text.lines() {
+        let header = line.trim().to_lowercase();
+        if !line.starts_with([' ', '\t']) && header.ends_with("commands:") {
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with([' ', '\t']) {
+            in_section = false;
+            continue;
+        }
+        if let Some(name) = line.split_whitespace().next()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            names.push(name.to_string());
+        }
+    }
+
+    names
 }
 
 impl HelpInfo {
@@ -84,5 +126,38 @@ mod tests {
         let info = parse_help("");
         assert!(info.flags.is_empty());
         assert!(info.subcommands.is_empty());
+        assert!(info.listed_subcommands.is_empty());
+    }
+
+    #[test]
+    fn parses_clap_command_section() {
+        let help = "Usage: mytool [OPTIONS] <COMMAND>\n\n\
+                    Commands:\n  \
+                    apps   Manage apps\n  \
+                    score  Score a tool\n  \
+                    help   Print this message\n\n\
+                    Options:\n  -h, --help  Print help";
+        let info = parse_help(help);
+        assert_eq!(info.listed_subcommands, vec!["apps", "score", "help"]);
+    }
+
+    #[test]
+    fn parses_cobra_available_commands_section() {
+        let help = "Usage:\n  mytool [command]\n\n\
+                    Available Commands:\n  \
+                    completion  Generate completions\n  \
+                    list        List things\n\n\
+                    Flags:\n  -h, --help  help for mytool";
+        let info = parse_help(help);
+        assert_eq!(info.listed_subcommands, vec!["completion", "list"]);
+    }
+
+    #[test]
+    fn prose_outside_command_section_is_not_a_subcommand() {
+        let help = "Usage: mytool\n\nA tool that manages things.\n\n\
+                    Commands:\n  list  List things\n\n\
+                    Options:\n  --verbose  Be chatty";
+        let info = parse_help(help);
+        assert_eq!(info.listed_subcommands, vec!["list"]);
     }
 }

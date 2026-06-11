@@ -6,13 +6,18 @@ use crate::Cli;
 pub fn print_schema() {
     let cmd = Cli::command();
     let schema = json!({
+        "clispec": "0.2",
         "name": "clispec",
         "version": env!("CARGO_PKG_VERSION"),
         "description": "Score CLI tools against The CLI Spec",
+        "global_args": [
+            {"name": "--json", "type": "boolean", "required": false,
+             "description": "Output as JSON"}
+        ],
         "commands": walk_commands(&cmd),
         "errors": [
-            {"kind": "not_found", "retryable": false, "description": "Binary not found on PATH"},
-            {"kind": "timeout", "retryable": true, "description": "Binary execution timed out"},
+            {"kind": "not_found", "exit_code": 3, "retryable": false,
+             "description": "Binary not found on PATH"},
         ]
     });
     println!(
@@ -40,6 +45,7 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
             let mut entry = json!({
                 "name": c.get_name(),
                 "description": c.get_about().map(|s| s.to_string()).unwrap_or_default(),
+                "mutating": false,
             });
             if !args.is_empty() {
                 entry["args"] = json!(args);

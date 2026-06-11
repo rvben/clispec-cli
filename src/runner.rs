@@ -7,13 +7,29 @@ pub struct RunResult {
     pub exit_code: i32,
 }
 
-pub fn run(binary: &str, args: &[&str], _timeout: Duration) -> RunResult {
-    let child = Command::new(binary)
+pub fn run(binary: &str, args: &[&str], timeout: Duration) -> RunResult {
+    run_with_env(binary, args, timeout, &[])
+}
+
+/// Run a binary with additional environment variable overrides.
+/// Used to probe behavior in a sanitized environment (e.g. `schema` with
+/// HOME pointing at an empty directory to prove it needs no config).
+pub fn run_with_env(
+    binary: &str,
+    args: &[&str],
+    _timeout: Duration,
+    envs: &[(&str, &str)],
+) -> RunResult {
+    let mut command = Command::new(binary);
+    command
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
+        .stderr(std::process::Stdio::piped());
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let child = command.spawn();
 
     let child = match child {
         Ok(c) => c,

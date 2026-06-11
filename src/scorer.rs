@@ -77,28 +77,33 @@ fn discover_subcommand(
         }
     }
 
-    // Try top-level help for direct list/status commands
+    // Try top-level help for a direct list/status command
     let help_info = help::parse_help(help_text);
-    if let Some(sub) = help_info.first_list_subcommand() {
+    let listed = &help_info.listed_subcommands;
+    for verb in ["list", "ls", "status", "info", "get", "show"] {
+        if listed.iter().any(|s| s == verb) {
+            return vec![verb.to_string()];
+        }
+    }
+    if listed.is_empty()
+        && let Some(sub) = help_info.first_list_subcommand()
+    {
         return vec![sub.to_string()];
     }
 
-    // Try nested subcommands — look for "noun list" patterns
-    // Extract candidate nouns from help (words that appear as subcommands)
-    let nouns: Vec<&str> = help_text
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            // Lines that look like "  noun   Description" in help
-            if trimmed.starts_with(char::is_alphabetic) {
-                trimmed.split_whitespace().next()
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    for noun in &nouns {
+    // Try nested subcommands — probe each noun from the Commands section
+    // for a "noun list" style command
+    const NOT_NOUNS: &[&str] = &[
+        "help",
+        "version",
+        "schema",
+        "completion",
+        "completions",
+        "init",
+        "login",
+        "logout",
+    ];
+    for noun in listed.iter().filter(|n| !NOT_NOUNS.contains(&n.as_str())) {
         for verb in &["list", "ls", "status"] {
             let result = runner::run(binary, &[noun, verb, "--help"], Duration::from_secs(3));
             if result.exit_code == 0 {
