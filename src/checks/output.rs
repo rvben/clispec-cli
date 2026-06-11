@@ -105,7 +105,10 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
             args.extend_from_slice(flags);
             let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+            // Non-empty stdout required: a tool that treats -o as an output
+            // filename exits 0 with empty stdout and must not pass.
             if result.exit_code == 0
+                && !result.stdout.trim().is_empty()
                 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_err()
             {
                 honored = true;

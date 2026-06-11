@@ -65,11 +65,9 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             CheckResult::fail("Output fields declared")
         });
 
-        // Check 6: Global args declared at the top level
-        let has_global_args = s
-            .get("global_args")
-            .and_then(|g| g.as_array())
-            .is_some_and(|arr| !arr.is_empty());
+        // Check 6: Global args declared at the top level. An empty array
+        // is a valid declaration: it states the tool has no global flags.
+        let has_global_args = s.get("global_args").is_some_and(|g| g.is_array());
         checks.push(if has_global_args {
             CheckResult::pass("Global args declared")
         } else {
