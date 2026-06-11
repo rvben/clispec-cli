@@ -40,11 +40,43 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
                         .is_some_and(|m| !m)
                 })
         });
-    checks.push(if has_yes_or_force || no_mutating_commands {
-        CheckResult::pass("--yes flag")
-    } else {
-        CheckResult::fail("--yes flag")
-    });
+    // The bypass flag may live on the destructive subcommand only; the schema
+    // declares it even when the probed help text does not show it.
+    let schema_declares_bypass = ctx.schema_json.as_ref().is_some_and(schema_has_bypass_flag);
+    checks.push(
+        if has_yes_or_force || no_mutating_commands || schema_declares_bypass {
+            CheckResult::pass("--yes flag")
+        } else {
+            CheckResult::fail("--yes flag")
+        },
+    );
 
     PrincipleScore::new("Non-Interactive", checks, 2)
+}
+
+/// True when any command (or global arg) in the schema declares a --yes or
+/// --force style bypass flag, including required positional `yes` args.
+fn schema_has_bypass_flag(schema: &serde_json::Value) -> bool {
+    let arg_is_bypass = |arg: &serde_json::Value| {
+        arg.get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|n| {
+                let n = n.trim_start_matches('-');
+                n == "yes" || n == "force" || n == "y"
+            })
+    };
+    let args_have_bypass = |v: &serde_json::Value| {
+        v.as_array()
+            .is_some_and(|args| args.iter().any(arg_is_bypass))
+    };
+    if schema.get("global_args").is_some_and(args_have_bypass) {
+        return true;
+    }
+    schema
+        .get("commands")
+        .and_then(|c| c.as_array())
+        .is_some_and(|cmds| {
+            cmds.iter()
+                .any(|c| c.get("args").is_some_and(args_have_bypass))
+        })
 }
