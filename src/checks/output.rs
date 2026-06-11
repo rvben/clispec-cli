@@ -7,6 +7,11 @@ use super::{CheckContext, CheckResult, PrincipleScore};
 pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let help_info = help::parse_help(&ctx.help_text);
     let mut checks = Vec::new();
+    // Exit codes the schema declares as outcomes (data states, not failures)
+    // count as success: a diff-like tool exits 1 with a valid report on
+    // stdout, and that must not fail the output checks.
+    let outcome_codes = declared_outcome_codes(ctx);
+    let ok_exit = |code: i32| code == 0 || outcome_codes.contains(&code);
 
     let sub_help_info = super::subcommand_help_info(ctx);
 
@@ -42,7 +47,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
             args.extend_from_slice(flags);
             let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
-            if result.exit_code == 0
+            if ok_exit(result.exit_code)
                 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
             {
                 found_valid = true;
@@ -107,7 +112,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
             // Non-empty stdout required: a tool that treats -o as an output
             // filename exits 0 with empty stdout and must not pass.
-            if result.exit_code == 0
+            if ok_exit(result.exit_code)
                 && !result.stdout.trim().is_empty()
                 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_err()
             {
@@ -128,6 +133,21 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     }
 
     PrincipleScore::new("Structured Output", checks, 5)
+}
+
+/// Exit codes the schema's `outcomes` array declares as data states.
+fn declared_outcome_codes(ctx: &CheckContext) -> Vec<i32> {
+    ctx.schema_json
+        .as_ref()
+        .and_then(|s| s.get("outcomes"))
+        .and_then(|o| o.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|o| o.get("code").and_then(serde_json::Value::as_i64))
+                .map(|c| c as i32)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// True when stderr carries a structured error envelope with a `kind`,
