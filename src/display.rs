@@ -25,8 +25,41 @@ pub fn print_score(score: &Score, json: bool) {
             if check.passed {
                 eprintln!("    {} {}", "\u{2713}".green(), check.name.green());
             } else {
-                eprintln!("    {} {}", "\u{2717}".red(), check.name.red());
+                // Cite the conformance checklist item behind the failure so
+                // the score points at spec text, not scorer behavior.
+                let citation = check
+                    .checklist
+                    .map(|id| format!(" [{id}]"))
+                    .unwrap_or_default();
+                eprintln!(
+                    "    {} {}{}",
+                    "\u{2717}".red(),
+                    check.name.red(),
+                    citation.dimmed()
+                );
             }
+        }
+        eprintln!();
+    }
+
+    // Summarize which conformance checklist items are not yet satisfied,
+    // in checklist order, so the score points back at spec text.
+    let failing: Vec<&str> = score
+        .principles
+        .iter()
+        .flat_map(|p| &p.checks)
+        .filter(|c| !c.passed)
+        .filter_map(|c| c.checklist)
+        .collect();
+    let unsatisfied: Vec<(&str, &str)> = crate::checks::CHECKLIST_ITEMS
+        .iter()
+        .filter(|(id, _)| failing.contains(id))
+        .copied()
+        .collect();
+    if !unsatisfied.is_empty() {
+        eprintln!("  {}", "Unsatisfied checklist items:".bold());
+        for (id, summary) in unsatisfied {
+            eprintln!("    {} {}", format!("[{id}]").yellow(), summary);
         }
         eprintln!();
     }
@@ -39,7 +72,7 @@ pub fn print_score(score: &Score, json: bool) {
         )
         .bold()
     );
-    eprintln!("  Spec: https://clispec.dev");
+    eprintln!("  Spec: https://clispec.dev/#conformance");
     eprintln!();
 }
 

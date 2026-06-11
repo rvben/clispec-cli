@@ -7,11 +7,90 @@ pub mod streams;
 
 use serde::Serialize;
 
+/// The v0.2 conformance checklist (clispec.dev/#conformance), one entry per
+/// checklist item. Every scored check MUST map to exactly one of these ids;
+/// a check that cites no checklist item has no basis in the spec and must
+/// not award or deduct points. The summaries are abbreviations for review,
+/// not normative text - the published spec is authoritative.
+pub const CHECKLIST_ITEMS: [(&str, &str); 10] = [
+    (
+        "structured-output",
+        "Structured output when piped; explicit format flag wins over TTY detection",
+    ),
+    (
+        "error-envelope",
+        "On failure, exits non-zero with the error envelope as the last line of stderr",
+    ),
+    (
+        "schema-validates",
+        "Exposes a schema subcommand whose output validates against clispec.dev/schema/v0.2.json",
+    ),
+    (
+        "schema-offline",
+        "schema succeeds with no authentication, no configuration file, and no network",
+    ),
+    (
+        "help-mentions-schema",
+        "Root --help output mentions the schema subcommand",
+    ),
+    (
+        "stream-separation",
+        "Data to stdout and diagnostics to stderr in every output mode",
+    ),
+    (
+        "non-interactive",
+        "Runs to completion without a TTY; flag alternative for every interactive prompt",
+    ),
+    (
+        "confirmation-refusal",
+        "Commands that would prompt refuse without a TTY via confirmation_required",
+    ),
+    (
+        "idempotent-repeats",
+        "Re-running a satisfied command exits zero; incompatible repeats emit conflict",
+    ),
+    (
+        "bounded-lists",
+        "List commands support --limit/--offset and --fields with in-band truncation metadata",
+    ),
+];
+
+/// The checklist item a named check verifies. Returns `None` for unknown
+/// check names; the unit tests below reject any check without a mapping.
+pub fn checklist_item(check_name: &str) -> Option<&'static str> {
+    let id = match check_name {
+        "JSON output flag"
+        | "Valid JSON output"
+        | "Auto-JSON when piped"
+        | "Explicit format wins" => "structured-output",
+        "Structured errors" => "error-envelope",
+        "schema command exists"
+        | "Valid JSON schema"
+        | "Validates against clispec v0.2"
+        | "Error kinds documented"
+        | "Output fields declared"
+        | "Global args declared"
+        | "Exit codes on error kinds"
+        | "Mutation markers on all commands" => "schema-validates",
+        "schema works without config" => "schema-offline",
+        "schema mentioned in --help" => "help-mentions-schema",
+        "Clean stdout when piped" | "Messages on stderr only" => "stream-separation",
+        "No TTY hang" => "non-interactive",
+        "--yes flag" => "confirmation-refusal",
+        "Mutating markers in schema" | "Conflict error kind" => "idempotent-repeats",
+        "--limit flag" | "Pagination flag" | "--fields flag" => "bounded-lists",
+        _ => return None,
+    };
+    Some(id)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckResult {
     pub name: String,
     pub passed: bool,
     pub detail: Option<String>,
+    /// Conformance checklist item this check verifies (see CHECKLIST_ITEMS).
+    pub checklist: Option<&'static str>,
 }
 
 impl CheckResult {
@@ -20,6 +99,7 @@ impl CheckResult {
             name: name.to_string(),
             passed: true,
             detail: None,
+            checklist: checklist_item(name),
         }
     }
 
@@ -28,6 +108,7 @@ impl CheckResult {
             name: name.to_string(),
             passed: false,
             detail: None,
+            checklist: checklist_item(name),
         }
     }
 
@@ -36,6 +117,7 @@ impl CheckResult {
             name: name.to_string(),
             passed: false,
             detail: Some(detail.to_string()),
+            checklist: checklist_item(name),
         }
     }
 }
@@ -141,5 +223,61 @@ mod tests {
         assert_eq!(interactive::check(&ctx).checks.len(), 2);
         assert_eq!(idempotent::check(&ctx).checks.len(), 2);
         assert_eq!(bounded::check(&ctx).checks.len(), 3);
+    }
+
+    fn all_check_results() -> Vec<CheckResult> {
+        let ctx = test_context();
+        [
+            output::check(&ctx),
+            schema::check(&ctx),
+            streams::check(&ctx),
+            interactive::check(&ctx),
+            idempotent::check(&ctx),
+            bounded::check(&ctx),
+        ]
+        .into_iter()
+        .flat_map(|p| p.checks)
+        .collect()
+    }
+
+    #[test]
+    fn every_check_cites_a_checklist_item() {
+        for check in all_check_results() {
+            assert!(
+                check.checklist.is_some(),
+                "check '{}' cites no conformance checklist item; checks without \
+                 a basis in the published spec must not be scored",
+                check.name
+            );
+        }
+    }
+
+    #[test]
+    fn every_checklist_item_is_verified_by_a_check() {
+        let cited: std::collections::HashSet<&str> = all_check_results()
+            .iter()
+            .filter_map(|c| c.checklist)
+            .collect();
+        for (id, summary) in CHECKLIST_ITEMS {
+            assert!(
+                cited.contains(id),
+                "checklist item '{id}' ({summary}) has no check verifying it"
+            );
+        }
+    }
+
+    #[test]
+    fn checklist_mapping_targets_are_canonical() {
+        let ids: std::collections::HashSet<&str> =
+            CHECKLIST_ITEMS.iter().map(|(id, _)| *id).collect();
+        for check in all_check_results() {
+            if let Some(item) = check.checklist {
+                assert!(
+                    ids.contains(item),
+                    "check '{}' cites unknown checklist item '{item}'",
+                    check.name
+                );
+            }
+        }
     }
 }
