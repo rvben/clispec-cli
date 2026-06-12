@@ -36,43 +36,43 @@ fn discover_subcommand(
     if let Some(schema) = schema_json
         && let Some(commands) = schema.get("commands")
     {
-        let mut fallback: Option<Vec<String>> = None;
+        let entries = flatten_commands(commands);
 
-        let entries: Vec<(String, &serde_json::Value)> = if let Some(obj) = commands.as_object() {
-            obj.iter().map(|(k, v)| (k.clone(), v)).collect()
-        } else if let Some(arr) = commands.as_array() {
-            arr.iter()
-                .filter_map(|v| {
-                    v.get("name")
-                        .and_then(|n| n.as_str())
-                        .map(|n| (n.to_string(), v))
-                })
-                .collect()
-        } else {
-            vec![]
-        };
+        // Explicitly read-only commands (mutating == false) are safe to
+        // probe. Absent mutating means unknown in v0.2, so those are only a
+        // last resort for older schemas that relied on the v0.1 default.
+        let mut fallback_explicit: Option<Vec<String>> = None;
+        let mut fallback_unknown: Option<Vec<String>> = None;
 
         for (name, cmd) in &entries {
-            let is_mutating = cmd
-                .get("mutating")
-                .and_then(|m| m.as_bool())
-                .unwrap_or(false);
-            if !is_mutating {
-                let parts: Vec<String> = name.split_whitespace().map(|s| s.to_string()).collect();
-                // Prefer simple "noun list" commands (2 parts)
-                if let Some(last) = parts.last()
-                    && (last == "list" || last == "ls")
-                    && parts.len() == 2
-                {
-                    return parts;
+            let mutating = cmd.get("mutating").and_then(|m| m.as_bool());
+            if mutating == Some(true) {
+                continue;
+            }
+            let parts: Vec<String> = name.split_whitespace().map(|s| s.to_string()).collect();
+            // Prefer simple "noun list" commands (2 parts)
+            let is_list = parts.len() == 2
+                && parts
+                    .last()
+                    .is_some_and(|last| last == "list" || last == "ls");
+            match mutating {
+                Some(false) => {
+                    if is_list {
+                        return parts;
+                    }
+                    if fallback_explicit.is_none() {
+                        fallback_explicit = Some(parts);
+                    }
                 }
-                if fallback.is_none() {
-                    fallback = Some(parts);
+                _ => {
+                    if fallback_unknown.is_none() {
+                        fallback_unknown = Some(parts);
+                    }
                 }
             }
         }
 
-        if let Some(fb) = fallback {
+        if let Some(fb) = fallback_explicit.or(fallback_unknown) {
             return fb;
         }
     }
@@ -113,6 +113,51 @@ fn discover_subcommand(
     }
 
     vec![]
+}
+
+/// Flatten a schema `commands` value into (path, command) pairs for every
+/// LEAF command, recursing through nested `subcommands` arrays and building
+/// space-joined paths ("apps list"). Container commands are excluded:
+/// probing one only prints its help text. Object-form schemas (path-keyed
+/// maps) are already flat and pass through as-is.
+fn flatten_commands(commands: &serde_json::Value) -> Vec<(String, &serde_json::Value)> {
+    fn walk<'a>(
+        prefix: &str,
+        cmd: &'a serde_json::Value,
+        out: &mut Vec<(String, &'a serde_json::Value)>,
+    ) {
+        let Some(name) = cmd.get("name").and_then(|n| n.as_str()) else {
+            return;
+        };
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix} {name}")
+        };
+        if let Some(subs) = cmd.get("subcommands").and_then(|s| s.as_array())
+            && !subs.is_empty()
+        {
+            for sub in subs {
+                walk(&path, sub, out);
+            }
+            return;
+        }
+        out.push((path, cmd));
+    }
+
+    let mut out = Vec::new();
+    match commands {
+        serde_json::Value::Array(arr) => {
+            for cmd in arr {
+                walk("", cmd, &mut out);
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            out.extend(obj.iter().map(|(k, v)| (k.clone(), v)));
+        }
+        _ => {}
+    }
+    out
 }
 
 pub fn score(binary: &str, subcommand: &[String]) -> Score {
@@ -164,5 +209,85 @@ pub fn score(binary: &str, subcommand: &[String]) -> Score {
         percentage,
         grade: Score::grade_for(percentage),
         principles,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flatten_commands_recurses_into_nested_subcommands() {
+        let commands = serde_json::json!([
+            {"name": "apps", "mutating": false, "subcommands": [
+                {"name": "list", "mutating": false},
+                {"name": "delete", "mutating": true}
+            ]},
+            {"name": "deploy", "mutating": true}
+        ]);
+        let paths: Vec<String> = flatten_commands(&commands)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(paths, vec!["apps list", "apps delete", "deploy"]);
+    }
+
+    #[test]
+    fn flatten_commands_excludes_containers() {
+        let commands = serde_json::json!([
+            {"name": "apps", "subcommands": [{"name": "list"}]}
+        ]);
+        let entries = flatten_commands(&commands);
+        assert!(
+            entries.iter().all(|(p, _)| p != "apps"),
+            "container command must not be a probe candidate: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn flatten_commands_passes_object_form_through() {
+        let commands = serde_json::json!({
+            "apps list": {"mutating": false},
+            "deploy": {"mutating": true}
+        });
+        let mut paths: Vec<String> = flatten_commands(&commands)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        paths.sort();
+        assert_eq!(paths, vec!["apps list", "deploy"]);
+    }
+
+    #[test]
+    fn discover_prefers_nested_read_only_list_command() {
+        let schema = serde_json::json!({
+            "name": "mytool",
+            "version": "1.0.0",
+            "commands": [
+                {"name": "deploy", "mutating": true},
+                {"name": "apps", "subcommands": [
+                    {"name": "delete", "mutating": true},
+                    {"name": "list", "mutating": false}
+                ]}
+            ]
+        });
+        let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
+        assert_eq!(found, vec!["apps".to_string(), "list".to_string()]);
+    }
+
+    #[test]
+    fn discover_prefers_explicitly_read_only_over_unknown_mutating() {
+        // v0.2: absent mutating means unknown, so a command that states
+        // mutating=false outranks one that says nothing.
+        let schema = serde_json::json!({
+            "name": "mytool",
+            "version": "1.0.0",
+            "commands": [
+                {"name": "mystery"},
+                {"name": "status", "mutating": false}
+            ]
+        });
+        let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
+        assert_eq!(found, vec!["status".to_string()]);
     }
 }
