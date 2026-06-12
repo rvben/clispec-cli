@@ -98,12 +98,17 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     });
 
     // Check 5: Explicit format selection wins over TTY detection
-    // (stdout is piped here, so `-o text` must still produce text)
+    // (stdout is piped here, so an explicit human format must still produce
+    // non-JSON output). Tools name their human format "text" or "table";
+    // probe both vocabularies.
     if !ctx.subcommand.is_empty() {
         let text_flags: &[&[&str]] = &[
             &["-o", "text"],
             &["--output", "text"],
             &["--format", "text"],
+            &["-o", "table"],
+            &["--output", "table"],
+            &["--format", "table"],
         ];
         let mut honored = false;
         for flags in text_flags {
