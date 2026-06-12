@@ -72,11 +72,69 @@ fn schema_has_bypass_flag(schema: &serde_json::Value) -> bool {
     if schema.get("global_args").is_some_and(args_have_bypass) {
         return true;
     }
+    // The bypass flag usually lives on a nested destructive subcommand
+    // (e.g. `apps delete --yes`), so the walk must recurse.
+    fn any_command_has_bypass(
+        cmd: &serde_json::Value,
+        args_have_bypass: &impl Fn(&serde_json::Value) -> bool,
+    ) -> bool {
+        if cmd.get("args").is_some_and(args_have_bypass) {
+            return true;
+        }
+        cmd.get("subcommands")
+            .and_then(|s| s.as_array())
+            .is_some_and(|subs| {
+                subs.iter()
+                    .any(|sub| any_command_has_bypass(sub, args_have_bypass))
+            })
+    }
     schema
         .get("commands")
         .and_then(|c| c.as_array())
         .is_some_and(|cmds| {
             cmds.iter()
-                .any(|c| c.get("args").is_some_and(args_have_bypass))
+                .any(|c| any_command_has_bypass(c, &args_have_bypass))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bypass_flag_found_on_nested_subcommand() {
+        let schema = serde_json::json!({
+            "commands": [
+                {"name": "apps", "subcommands": [
+                    {"name": "delete", "mutating": true, "args": [
+                        {"name": "--yes", "type": "boolean"}
+                    ]}
+                ]}
+            ]
+        });
+        assert!(schema_has_bypass_flag(&schema));
+    }
+
+    #[test]
+    fn no_bypass_flag_anywhere_is_false() {
+        let schema = serde_json::json!({
+            "commands": [
+                {"name": "apps", "subcommands": [
+                    {"name": "delete", "mutating": true, "args": [
+                        {"name": "--slug", "type": "string"}
+                    ]}
+                ]}
+            ]
+        });
+        assert!(!schema_has_bypass_flag(&schema));
+    }
+
+    #[test]
+    fn bypass_flag_in_global_args_is_found() {
+        let schema = serde_json::json!({
+            "global_args": [{"name": "--force", "type": "boolean"}],
+            "commands": []
+        });
+        assert!(schema_has_bypass_flag(&schema));
+    }
 }
