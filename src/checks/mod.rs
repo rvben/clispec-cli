@@ -103,6 +103,15 @@ impl CheckResult {
         }
     }
 
+    pub fn pass_with(name: &str, detail: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            passed: true,
+            detail: Some(detail.to_string()),
+            checklist: checklist_item(name),
+        }
+    }
+
     pub fn fail(name: &str) -> Self {
         Self {
             name: name.to_string(),

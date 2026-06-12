@@ -74,15 +74,23 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             CheckResult::fail("Global args declared")
         });
 
-        // Check 7: Every error kind maps to an exit code
+        // Check 7: Error kinds expose exit codes. The published schema makes
+        // exit_code optional per kind (a passthrough kind like a remote job's
+        // own exit code legitimately omits it), so the check verifies the
+        // tool adopted the feature, not 100% coverage. Partial coverage
+        // passes with the ratio in the detail.
         checks.push(match exit_code_coverage(s) {
             ExitCodeCoverage::Full => CheckResult::pass("Exit codes on error kinds"),
             ExitCodeCoverage::NoErrors => {
                 CheckResult::fail_with("Exit codes on error kinds", "no error kinds declared")
             }
-            ExitCodeCoverage::Partial { missing, total } => CheckResult::fail_with(
+            ExitCodeCoverage::None { total } => CheckResult::fail_with(
                 "Exit codes on error kinds",
-                &format!("{missing} of {total} error kinds missing exit_code"),
+                &format!("none of {total} error kinds declare exit_code"),
+            ),
+            ExitCodeCoverage::Partial { declared, total } => CheckResult::pass_with(
+                "Exit codes on error kinds",
+                &format!("{declared} of {total} error kinds declare exit_code"),
             ),
         });
 
@@ -142,7 +150,8 @@ fn validate_against_clispec_v0_2(instance: &serde_json::Value) -> Result<(), Str
 enum ExitCodeCoverage {
     Full,
     NoErrors,
-    Partial { missing: u32, total: u32 },
+    None { total: u32 },
+    Partial { declared: u32, total: u32 },
 }
 
 fn exit_code_coverage(schema: &serde_json::Value) -> ExitCodeCoverage {
@@ -153,14 +162,16 @@ fn exit_code_coverage(schema: &serde_json::Value) -> ExitCodeCoverage {
         return ExitCodeCoverage::NoErrors;
     }
     let total = errors.len() as u32;
-    let missing = errors
+    let declared = errors
         .iter()
-        .filter(|e| !e.get("exit_code").is_some_and(|c| c.is_i64() || c.is_u64()))
+        .filter(|e| e.get("exit_code").is_some_and(|c| c.is_i64() || c.is_u64()))
         .count() as u32;
-    if missing == 0 {
+    if declared == total {
         ExitCodeCoverage::Full
+    } else if declared == 0 {
+        ExitCodeCoverage::None { total }
     } else {
-        ExitCodeCoverage::Partial { missing, total }
+        ExitCodeCoverage::Partial { declared, total }
     }
 }
 
@@ -337,16 +348,28 @@ mod tests {
         ]});
         assert!(matches!(exit_code_coverage(&full), ExitCodeCoverage::Full));
 
+        // exit_code is optional per kind in the published schema; a
+        // passthrough kind (e.g. a remote job's own exit code) omits it.
+        // Partial coverage counts the kinds that DO declare it.
         let partial = serde_json::json!({"errors": [
             {"kind": "auth", "exit_code": 3},
-            {"kind": "not_found"}
+            {"kind": "job_failed"}
         ]});
         assert!(matches!(
             exit_code_coverage(&partial),
             ExitCodeCoverage::Partial {
-                missing: 1,
+                declared: 1,
                 total: 2
             }
+        ));
+
+        let none_declared = serde_json::json!({"errors": [
+            {"kind": "auth"},
+            {"kind": "not_found"}
+        ]});
+        assert!(matches!(
+            exit_code_coverage(&none_declared),
+            ExitCodeCoverage::None { total: 2 }
         ));
 
         let none = serde_json::json!({"name": "mytool"});
