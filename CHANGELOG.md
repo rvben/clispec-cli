@@ -12,6 +12,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.4](https://github.com/rvben/clispec-cli/compare/v0.2.3...v0.2.4) - 2026-06-20
+
+### Fixed
+
+- **checks**: probe table as well as text for explicit human format ([4b29ae4](https://github.com/rvben/clispec-cli/commit/4b29ae42c0b54c05cf9b4f2abc4c40a95e8996b0))
+- **checks**: treat per-kind exit_code as optional per the published schema ([b498233](https://github.com/rvben/clispec-cli/commit/b49823308b81882dbeaa7874fd8eee776289ce1a))
+- **checks**: find confirmation bypass flags on nested subcommands ([688d48c](https://github.com/rvben/clispec-cli/commit/688d48c8fe47d02e3a0c605950a8762dd1a86c21))
+- **scorer**: discover probe subcommands inside nested schema arrays ([2e55d3a](https://github.com/rvben/clispec-cli/commit/2e55d3ad042669056c1c6fd43cf95dc6c073de55))
+
 ## [0.2.3](https://github.com/rvben/clispec-cli/compare/v0.2.2...v0.2.3) - 2026-06-11
 
 ### Added
