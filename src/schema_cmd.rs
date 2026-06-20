@@ -71,6 +71,22 @@ fn output_fields_for(command: &str) -> Option<Value> {
             {"name": "principles", "type": "object[]",
              "description": "Per-principle scores with per-check breakdown"}
         ])),
+        "schema" => Some(json!([
+            {"name": "clispec", "type": "string",
+             "description": "Schema version string, e.g. \"0.2\"."},
+            {"name": "name", "type": "string",
+             "description": "Binary name of the tool."},
+            {"name": "version", "type": "string",
+             "description": "Semver version of the tool."},
+            {"name": "description", "type": "string",
+             "description": "One-line description of the tool."},
+            {"name": "global_args", "type": "object[]",
+             "description": "Flags that apply to every command (e.g. --json)."},
+            {"name": "commands", "type": "object[]",
+             "description": "Array of command descriptors, each with name, description, mutating, args, and output_fields."},
+            {"name": "errors", "type": "object[]",
+             "description": "Structured error kinds with kind, exit_code, retryable, and description."}
+        ])),
         _ => None,
     }
 }
