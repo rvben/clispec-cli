@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.5](https://github.com/rvben/clispec-cli/compare/v0.2.4...v0.2.5) - 2026-06-20
+
+### Added
+
+- **schema**: fill missing output_fields for schema command ([ab76f95](https://github.com/rvben/clispec-cli/commit/ab76f95050deadeed54642c2b77053e3cd7f4818))
+
 ## [0.2.4](https://github.com/rvben/clispec-cli/compare/v0.2.3...v0.2.4) - 2026-06-20
 
 ### Fixed
