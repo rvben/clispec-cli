@@ -1,6 +1,9 @@
 use std::io::Read;
-use std::process::Command;
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 pub struct RunResult {
     pub stdout: String,
@@ -15,6 +18,25 @@ pub const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn run(binary: &str, args: &[&str], timeout: Duration) -> RunResult {
     run_with_env(binary, args, timeout, &[])
+}
+
+/// Forcibly terminate a probed child and reap it. On Unix the child runs in its
+/// own process group (see `process_group(0)` at spawn), so we signal the whole
+/// group: a probed tool that forked grandchildren (e.g. a shell running
+/// `sleep`) would otherwise keep the stdout/stderr pipes open and block the
+/// reader threads past the timeout.
+fn kill_and_reap(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let pgid = child.id() as i32;
+        // SAFETY: kill(2) with a negative pid signals the process group; an
+        // invalid/exited group is a harmless ESRCH.
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Run a binary with additional environment variable overrides.
@@ -32,6 +54,10 @@ pub fn run_with_env(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    // Put the child in its own process group so a timeout can signal the whole
+    // group, taking any grandchildren (and the pipes they hold) down with it.
+    #[cfg(unix)]
+    command.process_group(0);
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -76,8 +102,7 @@ pub fn run_with_env(
             Ok(Some(status)) => break status.code().unwrap_or(-1),
             Ok(None) => {
                 if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_and_reap(&mut child);
                     break -1;
                 }
                 std::thread::sleep(Duration::from_millis(15));
@@ -86,8 +111,7 @@ pub fn run_with_env(
             // the child is gone and its pipes are closed so the reader threads
             // reach EOF — otherwise the join() below would block forever.
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_and_reap(&mut child);
                 break -1;
             }
         }
@@ -139,9 +163,16 @@ mod tests {
     #[test]
     fn run_kills_on_timeout() {
         // A probed tool that hangs must not hang the scorer: the run returns
-        // near the timeout with a non-success exit code, not after sleep 5.
+        // near the timeout, not after sleep 5. The trailing `echo` keeps the
+        // shell from exec-optimizing away, so `sleep` runs as a forked
+        // grandchild that inherits the pipes — this only returns promptly if
+        // the whole process group is killed (not just the direct child).
         let start = std::time::Instant::now();
-        let result = run("sh", &["-c", "sleep 5"], Duration::from_millis(300));
+        let result = run(
+            "sh",
+            &["-c", "sleep 5; echo done"],
+            Duration::from_millis(300),
+        );
         let elapsed = start.elapsed();
         assert!(
             elapsed < Duration::from_secs(3),

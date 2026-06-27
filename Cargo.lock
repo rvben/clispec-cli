@@ -188,6 +188,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "jsonschema",
+ "libc",
  "owo-colors",
  "serde",
  "serde_json",
