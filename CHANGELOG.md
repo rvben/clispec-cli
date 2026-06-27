@@ -14,6 +14,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.6](https://github.com/rvben/clispec-cli/compare/v0.2.5...v0.2.6) - 2026-06-27
+
+### Fixed
+
+- **scorer**: skip meta commands in schema-based discovery ([83ffd63](https://github.com/rvben/clispec-cli/commit/83ffd6377f8c21b14f27cd6c6f8f11fbfe10807e))
+- **runner**: enforce a generous probe timeout that preserves output ([be9fcdb](https://github.com/rvben/clispec-cli/commit/be9fcdb43ed9b194db59967a7efa7e974ee9f97d))
+
 ## [0.2.5](https://github.com/rvben/clispec-cli/compare/v0.2.4...v0.2.5) - 2026-06-20
 
 ### Added
