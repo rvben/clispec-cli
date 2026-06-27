@@ -11,13 +11,18 @@ pub fn print_schema() {
         "version": env!("CARGO_PKG_VERSION"),
         "description": "Score CLI tools against The CLI Spec",
         "global_args": [
+            {"name": "--output", "type": "string", "required": false, "default": "auto",
+             "enum": ["auto", "text", "json"],
+             "description": "Output format. auto emits JSON when stdout is not a TTY, human-readable otherwise."},
             {"name": "--json", "type": "boolean", "required": false,
-             "description": "Output as JSON"}
+             "description": "Alias for --output json."}
         ],
         "commands": walk_commands(&cmd),
         "errors": [
+            {"kind": "usage", "exit_code": 2, "retryable": false,
+             "description": "Invalid arguments, unrecognized command, or bad flag value."},
             {"kind": "not_found", "exit_code": 3, "retryable": false,
-             "description": "Binary not found on PATH"},
+             "description": "The binary to score was not found on PATH."},
         ]
     });
     println!(
@@ -32,7 +37,7 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
         .map(|c| {
             let args: Vec<Value> = c
                 .get_arguments()
-                .filter(|a| !["help", "version", "json"].contains(&a.get_id().as_str()))
+                .filter(|a| !["help", "version", "json", "output"].contains(&a.get_id().as_str()))
                 .map(|a| {
                     json!({
                         "name": a.get_long().map(|l| format!("--{l}")).unwrap_or_else(|| a.get_id().to_string()),
