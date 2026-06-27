@@ -15,6 +15,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.7](https://github.com/rvben/clispec-cli/compare/v0.2.6...v0.2.7) - 2026-06-28
+
+### Added
+
+- **cli**: agent-friendly output and structured errors ([c56115e](https://github.com/rvben/clispec-cli/commit/c56115e1232060dd9a11df895e18b07c41733649))
+
 ## [0.2.6](https://github.com/rvben/clispec-cli/compare/v0.2.5...v0.2.6) - 2026-06-27
 
 ### Fixed
