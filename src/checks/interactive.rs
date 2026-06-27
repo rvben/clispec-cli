@@ -1,6 +1,5 @@
 use crate::help;
 use crate::runner;
-use std::time::Duration;
 
 use super::{CheckContext, CheckResult, PrincipleScore};
 
@@ -9,9 +8,9 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let sub_help_info = super::subcommand_help_info(ctx);
     let mut checks = Vec::new();
 
-    // Check 1: No hang without TTY (run with closed stdin, timeout 5s)
-    // runner::run already uses Stdio::null() for stdin
-    let result = runner::run(&ctx.binary, &["--help"], Duration::from_secs(5));
+    // Check 1: No hang without TTY (run with closed stdin; the runner enforces
+    // PROBE_TIMEOUT as a safety ceiling). runner::run already uses Stdio::null().
+    let result = runner::run(&ctx.binary, &["--help"], runner::PROBE_TIMEOUT);
     checks.push(if result.exit_code >= 0 {
         CheckResult::pass("No TTY hang")
     } else {

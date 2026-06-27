@@ -166,7 +166,7 @@ pub fn subcommand_help_info(ctx: &CheckContext) -> Option<crate::help::HelpInfo>
     }
     let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
     args.push("--help");
-    let result = crate::runner::run(&ctx.binary, &args, std::time::Duration::from_secs(5));
+    let result = crate::runner::run(&ctx.binary, &args, crate::runner::PROBE_TIMEOUT);
     if result.exit_code < 0 {
         return None;
     }

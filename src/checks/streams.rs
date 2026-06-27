@@ -1,5 +1,4 @@
 use crate::runner;
-use std::time::Duration;
 
 use super::{CheckContext, CheckResult, PrincipleScore};
 
@@ -8,7 +7,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
 
     if !ctx.subcommand.is_empty() {
         let args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
-        let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+        let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
 
         // Check 1: stdout is parseable JSON when piped
         let stdout_clean = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();

@@ -1,5 +1,4 @@
 use crate::runner;
-use std::time::Duration;
 
 use super::{CheckContext, CheckResult, PrincipleScore};
 
@@ -11,7 +10,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let mut checks = Vec::new();
 
     // Run schema command
-    let result = runner::run(&ctx.binary, &["schema"], Duration::from_secs(5));
+    let result = runner::run(&ctx.binary, &["schema"], runner::PROBE_TIMEOUT);
     let schema: Option<serde_json::Value> = serde_json::from_str(&result.stdout).ok();
 
     // Check 1: schema command exists and exits 0
@@ -233,7 +232,7 @@ fn schema_works_without_config(binary: &str) -> bool {
     let result = runner::run_with_env(
         binary,
         &["schema"],
-        Duration::from_secs(5),
+        runner::PROBE_TIMEOUT,
         &[("HOME", &tmp), ("XDG_CONFIG_HOME", &tmp)],
     );
     result.exit_code == 0 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()

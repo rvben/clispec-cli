@@ -1,6 +1,5 @@
 use crate::help;
 use crate::runner;
-use std::time::Duration;
 
 use super::{CheckContext, CheckResult, PrincipleScore};
 
@@ -46,7 +45,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         for flags in json_flags {
             let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
             args.extend_from_slice(flags);
-            let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+            let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
             if ok_exit(result.exit_code)
                 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
             {
@@ -70,7 +69,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     // When we run via Command, stdout is already not a TTY
     if !ctx.subcommand.is_empty() {
         let args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
-        let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+        let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
         let is_json = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();
         checks.push(if is_json {
             CheckResult::pass("Auto-JSON when piped")
@@ -89,7 +88,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let bad_result = runner::run(
         &ctx.binary,
         &["__nonexistent_command__"],
-        Duration::from_secs(5),
+        runner::PROBE_TIMEOUT,
     );
     checks.push(if stderr_has_error_envelope(&bad_result.stderr) {
         CheckResult::pass("Structured errors")
@@ -114,7 +113,7 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         for flags in text_flags {
             let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
             args.extend_from_slice(flags);
-            let result = runner::run(&ctx.binary, &args, Duration::from_secs(5));
+            let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
             // Non-empty stdout required: a tool that treats -o as an output
             // filename exits 0 with empty stdout and must not pass.
             if ok_exit(result.exit_code)
