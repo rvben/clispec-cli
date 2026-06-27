@@ -3,7 +3,6 @@ use serde::Serialize;
 use crate::checks::{self, CheckContext, PrincipleScore};
 use crate::help;
 use crate::runner;
-use std::time::Duration;
 
 #[derive(Debug, Serialize)]
 pub struct Score {
@@ -26,6 +25,20 @@ impl Score {
         }
     }
 }
+
+/// Command nouns that are not representative of a tool's real behavior:
+/// introspection, help, and auth/setup verbs. Discovery skips these when
+/// choosing a command to score, in both the schema- and help-based paths.
+const NOT_NOUNS: &[&str] = &[
+    "help",
+    "version",
+    "schema",
+    "completion",
+    "completions",
+    "init",
+    "login",
+    "logout",
+];
 
 fn discover_subcommand(
     binary: &str,
@@ -55,11 +68,20 @@ fn discover_subcommand(
                 && parts
                     .last()
                     .is_some_and(|last| last == "list" || last == "ls");
+            if is_list {
+                return parts;
+            }
+            // Don't let an introspection/help command stand in as the
+            // representative — scoring `schema`/`completions` misjudges the
+            // tool. Same exclusion the help-based path below applies.
+            let is_meta = parts
+                .first()
+                .is_some_and(|noun| NOT_NOUNS.contains(&noun.as_str()));
+            if is_meta {
+                continue;
+            }
             match mutating {
                 Some(false) => {
-                    if is_list {
-                        return parts;
-                    }
                     if fallback_explicit.is_none() {
                         fallback_explicit = Some(parts);
                     }
@@ -93,19 +115,9 @@ fn discover_subcommand(
 
     // Try nested subcommands — probe each noun from the Commands section
     // for a "noun list" style command
-    const NOT_NOUNS: &[&str] = &[
-        "help",
-        "version",
-        "schema",
-        "completion",
-        "completions",
-        "init",
-        "login",
-        "logout",
-    ];
     for noun in listed.iter().filter(|n| !NOT_NOUNS.contains(&n.as_str())) {
         for verb in &["list", "ls", "status"] {
-            let result = runner::run(binary, &[noun, verb, "--help"], Duration::from_secs(3));
+            let result = runner::run(binary, &[noun, verb, "--help"], runner::PROBE_TIMEOUT);
             if result.exit_code == 0 {
                 return vec![noun.to_string(), verb.to_string()];
             }
@@ -165,14 +177,14 @@ pub fn score(binary: &str, subcommand: &[String]) -> Score {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| binary.to_string());
 
-    let help_result = runner::run(binary, &["--help"], Duration::from_secs(5));
+    let help_result = runner::run(binary, &["--help"], runner::PROBE_TIMEOUT);
     let help_text = if help_result.exit_code == 0 {
         help_result.stdout.clone()
     } else {
         help_result.stderr.clone()
     };
 
-    let schema_result = runner::run(binary, &["schema"], Duration::from_secs(5));
+    let schema_result = runner::run(binary, &["schema"], runner::PROBE_TIMEOUT);
     let schema_json: Option<serde_json::Value> = serde_json::from_str(&schema_result.stdout).ok();
 
     let subcommand = if subcommand.is_empty() {
@@ -273,6 +285,28 @@ mod tests {
         });
         let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
         assert_eq!(found, vec!["apps".to_string(), "list".to_string()]);
+    }
+
+    #[test]
+    fn discover_skips_meta_commands_as_representative() {
+        // A tool whose only non-mutating leaves are introspection commands must
+        // not be represented by one of them — scoring `schema`/`completions`
+        // misjudges the tool. The schema-based discovery must exclude meta
+        // commands just like the help-based path does (NOT_NOUNS).
+        let schema = serde_json::json!({
+            "name": "mytool",
+            "version": "1.0.0",
+            "commands": [
+                {"name": "schema", "mutating": false},
+                {"name": "completions", "mutating": false},
+                {"name": "run", "mutating": true}
+            ]
+        });
+        let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
+        assert!(
+            found != vec!["schema".to_string()] && found != vec!["completions".to_string()],
+            "must not pick a meta command as representative, got {found:?}"
+        );
     }
 
     #[test]
