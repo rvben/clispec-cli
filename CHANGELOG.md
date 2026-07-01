@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.9](https://github.com/rvben/clispec-cli/compare/v0.2.8...v0.2.9) - 2026-07-01
+
+### Fixed
+
+- **scorer**: scope the confirmation-bypass check to commands that prompt ([b650a91](https://github.com/rvben/clispec-cli/commit/b650a916955859de2517c82fc928013ed7a0a7c8))
+
 ## [0.2.8](https://github.com/rvben/clispec-cli/compare/v0.2.7...v0.2.8) - 2026-07-01
 
 ### Added
