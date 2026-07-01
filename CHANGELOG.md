@@ -16,6 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.8](https://github.com/rvben/clispec-cli/compare/v0.2.7...v0.2.8) - 2026-07-01
+
+### Added
+
+- **scorer**: probe a command's declared example for output checks ([ea0fef4](https://github.com/rvben/clispec-cli/commit/ea0fef44140d353f24d396adc8f3fac30dcdc336))
+
 ## [0.2.7](https://github.com/rvben/clispec-cli/compare/v0.2.6...v0.2.7) - 2026-06-28
 
 ### Added
