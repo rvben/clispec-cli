@@ -17,7 +17,19 @@ pub struct RunResult {
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn run(binary: &str, args: &[&str], timeout: Duration) -> RunResult {
-    run_with_env(binary, args, timeout, &[])
+    run_full(binary, args, timeout, &[], None)
+}
+
+/// Run a binary, feeding `stdin` to its standard input. Used to probe tools
+/// whose representative command reads from stdin (declared via a schema
+/// `example`).
+pub fn run_with_stdin(
+    binary: &str,
+    args: &[&str],
+    stdin: Option<&str>,
+    timeout: Duration,
+) -> RunResult {
+    run_full(binary, args, timeout, &[], stdin)
 }
 
 /// Forcibly terminate a probed child and reap it. On Unix the child runs in its
@@ -48,10 +60,24 @@ pub fn run_with_env(
     timeout: Duration,
     envs: &[(&str, &str)],
 ) -> RunResult {
+    run_full(binary, args, timeout, envs, None)
+}
+
+fn run_full(
+    binary: &str,
+    args: &[&str],
+    timeout: Duration,
+    envs: &[(&str, &str)],
+    stdin: Option<&str>,
+) -> RunResult {
     let mut command = Command::new(binary);
     command
         .args(args)
-        .stdin(std::process::Stdio::null())
+        .stdin(if stdin.is_some() {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     // Put the child in its own process group so a timeout can signal the whole
@@ -91,6 +117,15 @@ pub fn run_with_env(
         }
         buf
     });
+
+    // Feed stdin (if any), then close it so the child sees EOF. Done after the
+    // reader threads start so a chatty child cannot deadlock us on a full pipe.
+    if let Some(input) = stdin
+        && let Some(mut pipe) = child.stdin.take()
+    {
+        use std::io::Write;
+        let _ = pipe.write_all(input.as_bytes());
+    }
 
     // Wait up to `timeout`, killing the child if it overruns. A hanging probed
     // tool must never hang the scorer. Output captured before the kill is kept

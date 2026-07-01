@@ -6,8 +6,14 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let mut checks = Vec::new();
 
     if !ctx.subcommand.is_empty() {
-        let args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
-        let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
+        let probe = ctx.probe();
+        let args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
+        let result = runner::run_with_stdin(
+            &ctx.binary,
+            &args,
+            probe.stdin.as_deref(),
+            runner::PROBE_TIMEOUT,
+        );
 
         // Check 1: stdout is parseable JSON when piped
         let stdout_clean = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();

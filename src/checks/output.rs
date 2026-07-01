@@ -12,6 +12,10 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let outcome_codes = declared_outcome_codes(ctx);
     let ok_exit = |code: i32| code == 0 || outcome_codes.contains(&code);
 
+    // How to invoke the representative command (its declared `example`, or the
+    // discovered subcommand name as a fallback), plus any stdin it wants.
+    let probe = ctx.probe();
+
     let sub_help_info = super::subcommand_help_info(ctx);
 
     // Check 1: JSON output flag in help (--json, --output, -o, --format)
@@ -43,9 +47,14 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         ];
         let mut found_valid = false;
         for flags in json_flags {
-            let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
+            let mut args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
             args.extend_from_slice(flags);
-            let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
+            let result = runner::run_with_stdin(
+                &ctx.binary,
+                &args,
+                probe.stdin.as_deref(),
+                runner::PROBE_TIMEOUT,
+            );
             if ok_exit(result.exit_code)
                 && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
             {
@@ -68,8 +77,13 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     // Check 3: Auto-JSON when piped (stdout not a TTY)
     // When we run via Command, stdout is already not a TTY
     if !ctx.subcommand.is_empty() {
-        let args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
-        let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
+        let args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
+        let result = runner::run_with_stdin(
+            &ctx.binary,
+            &args,
+            probe.stdin.as_deref(),
+            runner::PROBE_TIMEOUT,
+        );
         let is_json = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();
         checks.push(if is_json {
             CheckResult::pass("Auto-JSON when piped")
@@ -111,9 +125,14 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         ];
         let mut honored = false;
         for flags in text_flags {
-            let mut args: Vec<&str> = ctx.subcommand.iter().map(|s| s.as_str()).collect();
+            let mut args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
             args.extend_from_slice(flags);
-            let result = runner::run(&ctx.binary, &args, runner::PROBE_TIMEOUT);
+            let result = runner::run_with_stdin(
+                &ctx.binary,
+                &args,
+                probe.stdin.as_deref(),
+                runner::PROBE_TIMEOUT,
+            );
             // Non-empty stdout required: a tool that treats -o as an output
             // filename exits 0 with empty stdout and must not pass.
             if ok_exit(result.exit_code)

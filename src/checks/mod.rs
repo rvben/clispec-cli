@@ -158,6 +158,70 @@ pub struct CheckContext {
     pub schema_json: Option<serde_json::Value>,
 }
 
+/// A self-contained invocation for exercising the representative command: base
+/// args plus optional stdin. Lets a tool whose command reads a path or stdin be
+/// probed for its structured output, instead of the scorer guessing that the
+/// command name works as a positional.
+pub struct Probe {
+    pub args: Vec<String>,
+    pub stdin: Option<String>,
+}
+
+impl CheckContext {
+    /// How to invoke the representative command for output/stream probes. Prefers
+    /// the command's declared `example` (args + stdin); otherwise falls back to
+    /// running the discovered subcommand name directly.
+    pub fn probe(&self) -> Probe {
+        self.representative_example().unwrap_or_else(|| Probe {
+            args: self.subcommand.clone(),
+            stdin: None,
+        })
+    }
+
+    fn representative_example(&self) -> Option<Probe> {
+        let commands = self.schema_json.as_ref()?.get("commands")?.as_array()?;
+        let example = find_command(commands, &self.subcommand.join(" "))?.get("example")?;
+        let args = example
+            .get("args")
+            .and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let stdin = example
+            .get("stdin")
+            .and_then(|s| s.as_str())
+            .map(String::from);
+        Some(Probe { args, stdin })
+    }
+}
+
+/// Find a command by its space-joined path ("scan" or "apps list"), recursing
+/// into nested `subcommands`.
+fn find_command<'a>(
+    commands: &'a [serde_json::Value],
+    path: &str,
+) -> Option<&'a serde_json::Value> {
+    for cmd in commands {
+        let Some(name) = cmd.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        if name == path {
+            return Some(cmd);
+        }
+        if let Some(rest) = path.strip_prefix(name).map(str::trim_start)
+            && !rest.is_empty()
+            && let Some(subs) = cmd.get("subcommands").and_then(|s| s.as_array())
+            && let Some(found) = find_command(subs, rest)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
 /// Run `binary subcommand... --help` and parse the help output.
 /// Returns `None` if the subcommand is empty or the command fails.
 pub fn subcommand_help_info(ctx: &CheckContext) -> Option<crate::help::HelpInfo> {
@@ -184,6 +248,43 @@ mod tests {
             help_text: String::new(),
             schema_json: None,
         }
+    }
+
+    #[test]
+    fn probe_uses_declared_example() {
+        let ctx = CheckContext {
+            binary: "x".to_string(),
+            subcommand: vec!["scan".to_string()],
+            help_text: String::new(),
+            schema_json: Some(serde_json::json!({
+                "commands": [{"name": "scan", "example": {"args": ["-"], "stdin": "hi"}}]
+            })),
+        };
+        let probe = ctx.probe();
+        assert_eq!(probe.args, vec!["-".to_string()]);
+        assert_eq!(probe.stdin.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn probe_falls_back_to_subcommand_without_example() {
+        let ctx = CheckContext {
+            binary: "x".to_string(),
+            subcommand: vec!["report".to_string()],
+            help_text: String::new(),
+            schema_json: Some(serde_json::json!({"commands": [{"name": "report"}]})),
+        };
+        let probe = ctx.probe();
+        assert_eq!(probe.args, vec!["report".to_string()]);
+        assert!(probe.stdin.is_none());
+    }
+
+    #[test]
+    fn find_command_recurses_into_subcommands() {
+        let commands = serde_json::json!([
+            {"name": "apps", "subcommands": [{"name": "list", "example": {"args": ["x"]}}]}
+        ]);
+        let found = find_command(commands.as_array().unwrap(), "apps list");
+        assert!(found.is_some_and(|c| c.get("example").is_some()));
     }
 
     #[test]
