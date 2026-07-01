@@ -18,6 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 
 
+
+## [0.2.10](https://github.com/rvben/clispec-cli/compare/v0.2.9...v0.2.10) - 2026-07-01
+
+### Added
+
+- **scorer**: accept a declared human piped-output default ([b06421f](https://github.com/rvben/clispec-cli/commit/b06421f2b046efb2ed61df73d0d387f97a96c137))
+
 ## [0.2.9](https://github.com/rvben/clispec-cli/compare/v0.2.8...v0.2.9) - 2026-07-01
 
 ### Fixed
