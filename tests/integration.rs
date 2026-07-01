@@ -73,3 +73,60 @@ fn nonexistent_binary() {
         Some("not_found")
     );
 }
+
+/// A tool that emits human text by default when piped but DECLARES that default
+/// in the schema `output` field (and offers JSON via `-o json`) is compliant per
+/// the amended Principle 1. It must pass the structured-output and stream-
+/// separation checks that a bare JSON-when-piped probe would have failed.
+#[cfg(unix)]
+#[test]
+fn declared_text_default_tool_is_scored_as_structured() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let script = r#"#!/bin/sh
+if [ "$1" = "schema" ]; then
+  cat <<'JSON'
+{"clispec":"0.2","name":"faketxt","version":"0.1.0","output":{"tty":"text","piped":"text"},"global_args":[{"name":"--output","type":"string","enum":["auto","text","json"],"default":"auto"}],"commands":[{"name":"run","mutating":false,"example":{"args":[],"stdin":""}}]}
+JSON
+  exit 0
+fi
+if [ "$1" = "--help" ]; then
+  echo "Usage: faketxt [--output text|json]. Run 'faketxt schema' for the contract."
+  exit 0
+fi
+for a in "$@"; do
+  if [ "$a" = "json" ]; then echo '{"ok":true}'; exit 0; fi
+done
+echo "plain text line"
+"#;
+    let path = std::env::temp_dir().join(format!("clispec-faketxt-{}.sh", std::process::id()));
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = clispec()
+        .args(["score", path.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let principles = json["principles"].as_array().unwrap();
+    let principle = |name: &str| principles.iter().find(|p| p["name"] == name).unwrap();
+
+    let structured = principle("Structured Output");
+    let check3 = structured["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "Structured or declared piped output")
+        .expect("check present");
+    assert_eq!(
+        check3["passed"], true,
+        "declared-text tool should pass: {check3}"
+    );
+
+    let streams = principle("Stderr/Stdout Separation");
+    for check in streams["checks"].as_array().unwrap() {
+        assert_eq!(check["passed"], true, "stream check should pass: {check}");
+    }
+}

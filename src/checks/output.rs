@@ -74,8 +74,12 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         ));
     }
 
-    // Check 3: Auto-JSON when piped (stdout not a TTY)
-    // When we run via Command, stdout is already not a TTY
+    // Check 3: structured output when piped. Emitting structured output by
+    // default when piped is the SHOULD ideal; a tool MAY keep a human-readable
+    // default if it DECLARES it in the schema `output` field, so the behavior is
+    // discoverable rather than a surprise. Undeclared human output, or a declared
+    // structured default the tool does not actually emit, fails.
+    const CHECK_3: &str = "Structured or declared piped output";
     if !ctx.subcommand.is_empty() {
         let args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
         let result = runner::run_with_stdin(
@@ -84,17 +88,31 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             probe.stdin.as_deref(),
             runner::PROBE_TIMEOUT,
         );
-        let is_json = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();
-        checks.push(if is_json {
-            CheckResult::pass("Auto-JSON when piped")
+        let auto_structured = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();
+        let piped_default = declared_piped_default(ctx);
+        checks.push(if auto_structured {
+            CheckResult::pass_with(CHECK_3, "structured by default when piped")
+        } else if piped_default.as_deref().is_some_and(is_human_format) {
+            CheckResult::pass_with(
+                CHECK_3,
+                &format!(
+                    "declared human default (output.piped = {})",
+                    piped_default.unwrap()
+                ),
+            )
+        } else if let Some(format) = piped_default {
+            CheckResult::fail_with(
+                CHECK_3,
+                &format!("declares output.piped = {format} but does not emit it when piped"),
+            )
         } else {
-            CheckResult::fail("Auto-JSON when piped")
+            CheckResult::fail_with(
+                CHECK_3,
+                "not structured when piped and no `output` default declared",
+            )
         });
     } else {
-        checks.push(CheckResult::fail_with(
-            "Auto-JSON when piped",
-            "no subcommand to test",
-        ));
+        checks.push(CheckResult::fail_with(CHECK_3, "no subcommand to test"));
     }
 
     // Check 4: Structured errors on stderr (the envelope is the last
@@ -173,6 +191,22 @@ fn declared_outcome_codes(ctx: &CheckContext) -> Vec<i32> {
         .unwrap_or_default()
 }
 
+/// The `output.piped` value declared in the schema (the format emitted when
+/// stdout is not a TTY and no format flag is given), if the tool declares one.
+fn declared_piped_default(ctx: &CheckContext) -> Option<String> {
+    ctx.schema_json
+        .as_ref()?
+        .get("output")?
+        .get("piped")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Whether a format name is human-readable (non-structured).
+fn is_human_format(format: &str) -> bool {
+    matches!(format, "text" | "table" | "plain")
+}
+
 /// True when stderr carries a structured error envelope with a `kind`,
 /// either as its last non-empty line (the spec rule) or as the whole stream.
 fn stderr_has_error_envelope(stderr: &str) -> bool {
@@ -215,5 +249,32 @@ mod tests {
     fn envelope_without_kind_rejected() {
         let stderr = "{\"error\": {\"message\": \"expired\"}}\n";
         assert!(!stderr_has_error_envelope(stderr));
+    }
+
+    fn ctx_with(schema: serde_json::Value) -> CheckContext {
+        CheckContext {
+            binary: "x".to_string(),
+            subcommand: vec![],
+            help_text: String::new(),
+            schema_json: Some(schema),
+        }
+    }
+
+    #[test]
+    fn declared_piped_default_reads_output_field() {
+        let ctx = ctx_with(serde_json::json!({"output": {"tty": "text", "piped": "text"}}));
+        assert_eq!(declared_piped_default(&ctx).as_deref(), Some("text"));
+        assert_eq!(
+            declared_piped_default(&ctx_with(serde_json::json!({}))),
+            None
+        );
+    }
+
+    #[test]
+    fn human_formats_classified() {
+        assert!(is_human_format("text"));
+        assert!(is_human_format("table"));
+        assert!(!is_human_format("json"));
+        assert!(!is_human_format("yaml"));
     }
 }

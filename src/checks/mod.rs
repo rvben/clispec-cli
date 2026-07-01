@@ -61,7 +61,7 @@ pub fn checklist_item(check_name: &str) -> Option<&'static str> {
     let id = match check_name {
         "JSON output flag"
         | "Valid JSON output"
-        | "Auto-JSON when piped"
+        | "Structured or declared piped output"
         | "Explicit format wins" => "structured-output",
         "Structured errors" => "error-envelope",
         "schema command exists"
