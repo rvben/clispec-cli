@@ -193,7 +193,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: |
-            clispec-*-${{ matrix.target }}.tar.gz*
+            clispec-${{ github.ref_name }}-${{ matrix.target }}.tar.gz*
           name: release-${{ matrix.target }}
 
   sdist:
