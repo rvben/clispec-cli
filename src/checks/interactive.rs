@@ -71,6 +71,13 @@ fn schema_has_bypass_flag(schema: &serde_json::Value) -> bool {
         cmd: &serde_json::Value,
         args_have_bypass: &impl Fn(&serde_json::Value) -> bool,
     ) -> bool {
+        if cmd
+            .get("confirmation_bypass_arg")
+            .and_then(|v| v.as_str())
+            .is_some()
+        {
+            return true;
+        }
         if cmd.get("args").is_some_and(args_have_bypass) {
             return true;
         }
@@ -141,6 +148,18 @@ mod tests {
         let schema = serde_json::json!({
             "global_args": [{"name": "--force", "type": "boolean"}],
             "commands": []
+        });
+        assert!(schema_has_bypass_flag(&schema));
+    }
+
+    #[test]
+    fn v0_3_confirmation_bypass_reference_is_found() {
+        let schema = serde_json::json!({
+            "commands": [{
+                "name": "delete",
+                "confirmation_bypass_arg": "--yes",
+                "args": [{"name": "--yes", "type": "boolean"}]
+            }]
         });
         assert!(schema_has_bypass_flag(&schema));
     }

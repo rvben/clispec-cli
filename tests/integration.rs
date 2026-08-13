@@ -34,13 +34,13 @@ fn schema_is_valid_json() {
 }
 
 #[test]
-fn own_schema_validates_against_clispec_v0_2() {
+fn own_schema_validates_against_clispec_v0_3() {
     let output = clispec().args(["schema"]).output().unwrap();
     assert!(output.status.success());
     let instance: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../schemas/v0.2.json")).unwrap();
+        serde_json::from_str(include_str!("../schemas/v0.3.json")).unwrap();
     let validator = jsonschema::draft202012::new(&schema).unwrap();
     let errors: Vec<String> = validator
         .iter_errors(&instance)
@@ -86,7 +86,7 @@ fn declared_text_default_tool_is_scored_as_structured() {
     let script = r#"#!/bin/sh
 if [ "$1" = "schema" ]; then
   cat <<'JSON'
-{"clispec":"0.2","name":"faketxt","version":"0.1.0","output":{"tty":"text","piped":"text"},"global_args":[{"name":"--output","type":"string","enum":["auto","text","json"],"default":"auto"}],"commands":[{"name":"run","mutating":false,"example":{"args":[],"stdin":""}}]}
+{"clispec":"0.3","name":"faketxt","version":"0.1.0","output":{"tty":"text","piped":"text"},"global_args":[{"name":"--output","type":"string","enum":["auto","text","json"],"default":"auto"}],"commands":[{"name":"run","description":"Run the fake tool","effects":"read_only","cardinality":"single","stdout_schema":{},"example":{"args":[],"stdin":""}}],"errors":[{"kind":"usage","exit_code":2,"retryable":false}]}
 JSON
   exit 0
 fi

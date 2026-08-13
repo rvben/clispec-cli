@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0](https://github.com/rvben/clispec-cli/compare/v0.2.10...v0.3.0) - 2026-08-13
+
+### Added
+
+- Score canonical clispec v0.3 effects, cardinality, pagination, streams, opaque output, confirmation, and schema contracts.
+- Prefer explicit offline-safe examples when probing commands.
+- Add a CI self-score gate requiring 24/24 Excellent.
+
+### Changed
+
+- Align format, structured-output, and bounded-output checks with clispec v0.3.
+
 
 
 

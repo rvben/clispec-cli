@@ -2,9 +2,9 @@ use crate::runner;
 
 use super::{CheckContext, CheckResult, PrincipleScore};
 
-/// The canonical clispec v0.2 schema, vendored from clispec.dev/schema/v0.2.json.
-/// v0.2 is additive over v0.1, so v0.1-shaped documents validate too.
-const CLISPEC_SCHEMA_V0_2: &str = include_str!("../../schemas/v0.2.json");
+/// The canonical clispec v0.3 candidate schema, vendored from
+/// clispec.dev/schema/v0.3.json.
+const CLISPEC_SCHEMA_V0_3: &str = include_str!("../../schemas/v0.3.json");
 
 pub fn check(ctx: &CheckContext) -> PrincipleScore {
     let mut checks = Vec::new();
@@ -28,10 +28,10 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     });
 
     if let Some(ref s) = schema {
-        // Check 3: Validates against clispec v0.2 JSON Schema
-        checks.push(match validate_against_clispec_v0_2(s) {
-            Ok(()) => CheckResult::pass("Validates against clispec v0.2"),
-            Err(detail) => CheckResult::fail_with("Validates against clispec v0.2", &detail),
+        // Check 3: Validates against the clispec v0.3 JSON Schema
+        checks.push(match validate_against_clispec_v0_3(s) {
+            Ok(()) => CheckResult::pass("Validates against clispec v0.3"),
+            Err(detail) => CheckResult::fail_with("Validates against clispec v0.3", &detail),
         });
 
         // Check 4: Has errors with kind
@@ -46,18 +46,19 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             CheckResult::fail("Error kinds documented")
         });
 
-        // Check 5: Commands have output_fields
-        let has_output_fields = s
-            .get("commands")
-            .and_then(|c| {
-                c.as_object()
-                    .map(|obj| obj.values().any(|v| v.get("output_fields").is_some()))
-                    .or_else(|| {
-                        c.as_array()
-                            .map(|arr| arr.iter().any(|v| v.get("output_fields").is_some()))
+        // Check 5: Every structured data command describes stdout. v0.3
+        // permits either the compact output_fields form or stdout_schema.
+        let has_output_fields =
+            s.get("commands")
+                .and_then(|c| c.as_array())
+                .is_some_and(|commands| {
+                    commands.iter().all(|command| {
+                        command.get("output_kind").and_then(|v| v.as_str()) != Some("data")
+                            && command.get("output_kind").is_some()
+                            || command.get("output_fields").is_some()
+                            || command.get("stdout_schema").is_some()
                     })
-            })
-            .unwrap_or(false);
+                });
         checks.push(if has_output_fields {
             CheckResult::pass("Output fields declared")
         } else {
@@ -93,25 +94,24 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             ),
         });
 
-        // Check 8: Every leaf command carries an explicit mutating marker
-        // (the spec defines absence as unknown, not read-only)
-        checks.push(match mutating_coverage(s) {
-            MutatingCoverage::Full => CheckResult::pass("Mutation markers on all commands"),
-            MutatingCoverage::NoCommands => {
-                CheckResult::fail_with("Mutation markers on all commands", "no commands declared")
+        // Check 8: Every command carries the required v0.3 effects declaration.
+        checks.push(match effects_coverage(s) {
+            EffectsCoverage::Full => CheckResult::pass("Effects on all commands"),
+            EffectsCoverage::NoCommands => {
+                CheckResult::fail_with("Effects on all commands", "no commands declared")
             }
-            MutatingCoverage::Partial { missing, total } => CheckResult::fail_with(
-                "Mutation markers on all commands",
-                &format!("{missing} of {total} commands missing mutating"),
+            EffectsCoverage::Partial { missing, total } => CheckResult::fail_with(
+                "Effects on all commands",
+                &format!("{missing} of {total} commands missing effects"),
             ),
         });
     } else {
-        checks.push(CheckResult::fail("Validates against clispec v0.2"));
+        checks.push(CheckResult::fail("Validates against clispec v0.3"));
         checks.push(CheckResult::fail("Error kinds documented"));
         checks.push(CheckResult::fail("Output fields declared"));
         checks.push(CheckResult::fail("Global args declared"));
         checks.push(CheckResult::fail("Exit codes on error kinds"));
-        checks.push(CheckResult::fail("Mutation markers on all commands"));
+        checks.push(CheckResult::fail("Effects on all commands"));
     }
 
     // Check 9: schema is discoverable from root --help
@@ -133,10 +133,10 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     PrincipleScore::new("Schema Introspection", checks, 10)
 }
 
-/// Validate an instance against the bundled clispec v0.2 JSON Schema.
+/// Validate an instance against the bundled clispec v0.3 JSON Schema.
 /// Returns Ok on success, or Err with the first validation error message.
-fn validate_against_clispec_v0_2(instance: &serde_json::Value) -> Result<(), String> {
-    let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_2)
+fn validate_against_clispec_v0_3(instance: &serde_json::Value) -> Result<(), String> {
+    let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_3)
         .expect("bundled clispec schema must be valid JSON");
     let validator = jsonschema::draft202012::new(&schema)
         .map_err(|e| format!("bundled schema is not a valid Draft 2020-12 schema: {e}"))?;
@@ -174,24 +174,20 @@ fn exit_code_coverage(schema: &serde_json::Value) -> ExitCodeCoverage {
     }
 }
 
-enum MutatingCoverage {
+enum EffectsCoverage {
     Full,
     NoCommands,
     Partial { missing: u32, total: u32 },
 }
 
-fn mutating_coverage(schema: &serde_json::Value) -> MutatingCoverage {
+fn effects_coverage(schema: &serde_json::Value) -> EffectsCoverage {
     fn walk(cmd: &serde_json::Value, total: &mut u32, missing: &mut u32) {
-        if let Some(subs) = cmd.get("subcommands").and_then(|s| s.as_array())
-            && !subs.is_empty()
-        {
-            for sub in subs {
-                walk(sub, total, missing);
-            }
-            return;
-        }
         *total += 1;
-        if !cmd.get("mutating").is_some_and(|m| m.is_boolean()) {
+        if !cmd
+            .get("effects")
+            .and_then(|e| e.as_str())
+            .is_some_and(|e| matches!(e, "read_only" | "idempotent" | "non_idempotent"))
+        {
             *missing += 1;
         }
     }
@@ -213,11 +209,11 @@ fn mutating_coverage(schema: &serde_json::Value) -> MutatingCoverage {
     }
 
     if total == 0 {
-        MutatingCoverage::NoCommands
+        EffectsCoverage::NoCommands
     } else if missing == 0 {
-        MutatingCoverage::Full
+        EffectsCoverage::Full
     } else {
-        MutatingCoverage::Partial { missing, total }
+        EffectsCoverage::Partial { missing, total }
     }
 }
 
@@ -244,99 +240,64 @@ mod tests {
 
     fn minimal_valid() -> serde_json::Value {
         serde_json::json!({
+            "clispec": "0.3",
             "name": "mytool",
             "version": "1.0.0",
-            "commands": [{ "name": "list" }]
+            "commands": [{
+                "name": "list",
+                "description": "List services",
+                "effects": "read_only",
+                "cardinality": "single",
+                "stdout_schema": {}
+            }],
+            "errors": [{
+                "kind": "usage",
+                "exit_code": 2,
+                "retryable": false,
+                "description": "Invalid invocation"
+            }]
         })
     }
 
     #[test]
     fn bundled_schema_is_valid_draft_2020_12() {
-        let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_2).unwrap();
+        let schema: serde_json::Value = serde_json::from_str(CLISPEC_SCHEMA_V0_3).unwrap();
         jsonschema::draft202012::new(&schema).expect("bundled schema must be valid");
     }
 
     #[test]
     fn minimal_document_validates() {
-        validate_against_clispec_v0_2(&minimal_valid()).expect("minimal doc should validate");
+        validate_against_clispec_v0_3(&minimal_valid()).expect("minimal doc should validate");
     }
 
     #[test]
-    fn v0_1_shaped_document_still_validates() {
-        // The pre-v0.2 spec example: no clispec field, no global_args,
-        // no exit_code on errors. v0.2 is additive, so this must pass.
-        let doc = serde_json::json!({
-            "name": "mytool",
-            "version": "1.2.0",
-            "commands": [{
-                "name": "list",
-                "description": "List all services",
-                "mutating": false,
-                "args": [
-                    {"name": "--status", "type": "string", "required": false,
-                     "enum": ["running", "stopped", "all"], "default": "all"},
-                    {"name": "--limit", "type": "integer", "required": false, "default": 100}
-                ],
-                "output_fields": [
-                    {"name": "name", "type": "string"},
-                    {"name": "status", "type": "string"},
-                    {"name": "uptime_seconds", "type": "integer | null"}
-                ]
-            }],
-            "errors": [
-                {"kind": "auth", "retryable": false, "description": "Authentication failed"},
-                {"kind": "rate_limit", "retryable": true, "description": "Too many requests"}
-            ]
-        });
-        validate_against_clispec_v0_2(&doc).expect("v0.1-shaped doc should validate");
-    }
-
-    #[test]
-    fn v0_2_spec_example_validates() {
-        let doc = serde_json::json!({
-            "clispec": "0.2",
-            "name": "mytool",
-            "version": "1.2.0",
-            "global_args": [
-                {"name": "--output", "type": "string",
-                 "enum": ["auto", "text", "json", "yaml"], "default": "auto"},
-                {"name": "--quiet", "type": "boolean", "default": false}
-            ],
-            "commands": [{ "name": "list", "mutating": false }],
-            "errors": [
-                {"kind": "auth", "exit_code": 3, "retryable": false},
-                {"kind": "not_found", "exit_code": 4, "retryable": false}
-            ]
-        });
-        validate_against_clispec_v0_2(&doc).expect("v0.2 spec example should validate");
+    fn v0_2_document_is_rejected() {
+        let mut doc = minimal_valid();
+        doc["clispec"] = serde_json::json!("0.2");
+        validate_against_clispec_v0_3(&doc).expect_err("v0.2 must not validate as v0.3");
     }
 
     #[test]
     fn missing_required_field_fails() {
         let doc = serde_json::json!({ "name": "mytool", "version": "1.0.0" });
-        validate_against_clispec_v0_2(&doc).expect_err("missing commands should fail");
+        validate_against_clispec_v0_3(&doc).expect_err("missing commands should fail");
     }
 
     #[test]
     fn error_kind_must_be_snake_case() {
-        let doc = serde_json::json!({
-            "name": "mytool",
-            "version": "1.0.0",
-            "commands": [{ "name": "list" }],
-            "errors": [{ "kind": "Not-Found" }]
-        });
-        validate_against_clispec_v0_2(&doc).expect_err("non-snake_case kind should fail");
+        let mut doc = minimal_valid();
+        doc["errors"] = serde_json::json!([{
+            "kind": "Not-Found", "exit_code": 2, "retryable": false
+        }]);
+        validate_against_clispec_v0_3(&doc).expect_err("non-snake_case kind should fail");
     }
 
     #[test]
     fn additional_properties_are_permitted() {
-        let doc = serde_json::json!({
-            "name": "mytool",
-            "version": "1.0.0",
-            "commands": [{ "name": "list", "x_custom": "anything" }],
-            "x_tool_metadata": { "vendor": "acme" }
-        });
-        validate_against_clispec_v0_2(&doc).expect("extensions should validate");
+        let mut doc = minimal_valid();
+        doc["commands"][0]["x_custom"] = serde_json::json!("anything");
+        doc["x_tool_metadata"] = serde_json::json!({"vendor": "acme"});
+        validate_against_clispec_v0_3(&doc).expect("extensions should validate");
     }
 
     #[test]
@@ -347,9 +308,8 @@ mod tests {
         ]});
         assert!(matches!(exit_code_coverage(&full), ExitCodeCoverage::Full));
 
-        // exit_code is optional per kind in the published schema; a
-        // passthrough kind (e.g. a remote job's own exit code) omits it.
-        // Partial coverage counts the kinds that DO declare it.
+        // The helper still reports partial legacy documents clearly even
+        // though v0.3 validation rejects them before this check is scored.
         let partial = serde_json::json!({"errors": [
             {"kind": "auth", "exit_code": 3},
             {"kind": "job_failed"}
@@ -379,31 +339,29 @@ mod tests {
     }
 
     #[test]
-    fn mutating_coverage_counts_leaves_recursively() {
+    fn effects_coverage_counts_flat_commands() {
         let doc = serde_json::json!({"commands": [
-            {"name": "list", "mutating": false},
-            {"name": "apps", "subcommands": [
-                {"name": "deploy", "mutating": true},
-                {"name": "status"}
-            ]}
+            {"name": "list", "effects": "read_only"},
+            {"name": "apps deploy", "effects": "idempotent"},
+            {"name": "apps status"}
         ]});
         assert!(matches!(
-            mutating_coverage(&doc),
-            MutatingCoverage::Partial {
+            effects_coverage(&doc),
+            EffectsCoverage::Partial {
                 missing: 1,
                 total: 3
             }
         ));
 
         let full = serde_json::json!({"commands": [
-            {"name": "list", "mutating": false}
+            {"name": "list", "effects": "read_only"}
         ]});
-        assert!(matches!(mutating_coverage(&full), MutatingCoverage::Full));
+        assert!(matches!(effects_coverage(&full), EffectsCoverage::Full));
 
         let none = serde_json::json!({"name": "mytool"});
         assert!(matches!(
-            mutating_coverage(&none),
-            MutatingCoverage::NoCommands
+            effects_coverage(&none),
+            EffectsCoverage::NoCommands
         ));
     }
 }

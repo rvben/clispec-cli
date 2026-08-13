@@ -47,18 +47,21 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
         ];
         let mut found_valid = false;
         for flags in json_flags {
-            let mut args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
-            args.extend_from_slice(flags);
-            let result = runner::run_with_stdin(
-                &ctx.binary,
-                &args,
-                probe.stdin.as_deref(),
-                runner::PROBE_TIMEOUT,
-            );
-            if ok_exit(result.exit_code)
-                && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
-            {
-                found_valid = true;
+            for args in probe_args_with_flag(probe.args.as_slice(), flags) {
+                let result = runner::run_with_stdin(
+                    &ctx.binary,
+                    &args,
+                    probe.stdin.as_deref(),
+                    runner::PROBE_TIMEOUT,
+                );
+                if ok_exit(result.exit_code)
+                    && serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok()
+                {
+                    found_valid = true;
+                    break;
+                }
+            }
+            if found_valid {
                 break;
             }
         }
@@ -140,31 +143,48 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             &["-o", "table"],
             &["--output", "table"],
             &["--format", "table"],
+            &["-o", "yaml"],
+            &["--output", "yaml"],
+            &["--format", "yaml"],
+            &["-o", "raw"],
+            &["--output", "raw"],
+            &["--format", "raw"],
         ];
         let mut honored = false;
+        let mut attempts = Vec::new();
         for flags in text_flags {
-            let mut args: Vec<&str> = probe.args.iter().map(|s| s.as_str()).collect();
-            args.extend_from_slice(flags);
-            let result = runner::run_with_stdin(
-                &ctx.binary,
-                &args,
-                probe.stdin.as_deref(),
-                runner::PROBE_TIMEOUT,
-            );
-            // Non-empty stdout required: a tool that treats -o as an output
-            // filename exits 0 with empty stdout and must not pass.
-            if ok_exit(result.exit_code)
-                && !result.stdout.trim().is_empty()
-                && serde_json::from_str::<serde_json::Value>(&result.stdout).is_err()
-            {
-                honored = true;
+            for args in probe_args_with_flag(probe.args.as_slice(), flags) {
+                let result = runner::run_with_stdin(
+                    &ctx.binary,
+                    &args,
+                    probe.stdin.as_deref(),
+                    runner::PROBE_TIMEOUT,
+                );
+                attempts.push(format!(
+                    "{}: exit {}, stdout={:?}, stderr={:?}",
+                    args.join(" "),
+                    result.exit_code,
+                    result.stdout.trim(),
+                    result.stderr.trim()
+                ));
+                // Non-empty stdout required: a tool that treats -o as an output
+                // filename exits 0 with empty stdout and must not pass.
+                if ok_exit(result.exit_code)
+                    && !result.stdout.trim().is_empty()
+                    && serde_json::from_str::<serde_json::Value>(&result.stdout).is_err()
+                {
+                    honored = true;
+                    break;
+                }
+            }
+            if honored {
                 break;
             }
         }
         checks.push(if honored {
             CheckResult::pass("Explicit format wins")
         } else {
-            CheckResult::fail("Explicit format wins")
+            CheckResult::fail_with("Explicit format wins", &attempts.join("; "))
         });
     } else {
         checks.push(CheckResult::fail_with(
@@ -174,6 +194,17 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
     }
 
     PrincipleScore::new("Structured Output", checks, 5)
+}
+
+/// Probe both common flag positions. Global options often must precede the
+/// command path, while command-local options conventionally follow it.
+fn probe_args_with_flag<'a>(base: &'a [String], flag: &'a [&'a str]) -> [Vec<&'a str>; 2] {
+    let base: Vec<&str> = base.iter().map(String::as_str).collect();
+    let mut appended = base.clone();
+    appended.extend_from_slice(flag);
+    let mut prepended = flag.to_vec();
+    prepended.extend_from_slice(&base);
+    [appended, prepended]
 }
 
 /// Exit codes the schema's `outcomes` array declares as data states.

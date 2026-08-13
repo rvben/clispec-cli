@@ -1,0 +1,25 @@
+name: clispec v0.3
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Self-score 24/24 Excellent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build scorer
+        run: cargo build --locked
+      - name: Require clispec v0.3 Excellent
+        shell: bash
+        run: |
+          report="$(target/debug/clispec score target/debug/clispec --output json)"
+          echo "$report" | jq .
+          jq -e '.score == 24 and .max == 24 and .grade == "Excellent"' <<<"$report"

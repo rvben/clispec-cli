@@ -2,6 +2,9 @@
 
 Score CLI tools against [The CLI Spec](https://clispec.dev).
 
+The development branch targets the v0.3 candidate contract and keeps the
+published release on frozen v0.2 until v0.3 freezes.
+
 ## Install
 
 ```

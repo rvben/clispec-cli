@@ -52,16 +52,20 @@ fn structured_stdout_is_clean(ctx: &CheckContext, probe: &Probe) -> bool {
         &["--format", "json"],
     ];
     for flags in json_flags {
-        let mut args = base.clone();
-        args.extend_from_slice(flags);
-        let result = runner::run_with_stdin(
-            &ctx.binary,
-            &args,
-            probe.stdin.as_deref(),
-            runner::PROBE_TIMEOUT,
-        );
-        if serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok() {
-            return true;
+        let mut appended = base.clone();
+        appended.extend_from_slice(flags);
+        let mut prepended = flags.to_vec();
+        prepended.extend_from_slice(&base);
+        for args in [appended, prepended] {
+            let result = runner::run_with_stdin(
+                &ctx.binary,
+                &args,
+                probe.stdin.as_deref(),
+                runner::PROBE_TIMEOUT,
+            );
+            if serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok() {
+                return true;
+            }
         }
     }
     false

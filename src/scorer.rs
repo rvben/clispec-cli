@@ -51,15 +51,34 @@ fn discover_subcommand(
     {
         let entries = flatten_commands(commands);
 
-        // Explicitly read-only commands (mutating == false) are safe to
-        // probe. Absent mutating means unknown in v0.2, so those are only a
-        // last resort for older schemas that relied on the v0.1 default.
+        // Explicitly read-only commands are safe to probe. The deprecated
+        // v0.2 mutating=false marker remains a fallback for older tools, but
+        // a v0.3 effects declaration takes precedence.
         let mut fallback_explicit: Option<Vec<String>> = None;
+        let mut fallback_list: Option<Vec<String>> = None;
+        let mut fallback_example: Option<Vec<String>> = None;
+        let mut fallback_safe_mutating_example: Option<Vec<String>> = None;
         let mut fallback_unknown: Option<Vec<String>> = None;
 
         for (name, cmd) in &entries {
-            let mutating = cmd.get("mutating").and_then(|m| m.as_bool());
-            if mutating == Some(true) {
+            let effects = cmd.get("effects").and_then(|e| e.as_str());
+            let legacy_mutating = cmd.get("mutating").and_then(|m| m.as_bool());
+            if matches!(effects, Some("idempotent" | "non_idempotent"))
+                || (effects.is_none() && legacy_mutating == Some(true))
+            {
+                let is_explicit_dry_run = cmd
+                    .get("example")
+                    .and_then(|e| e.get("args"))
+                    .and_then(|a| a.as_array())
+                    .is_some_and(|args| {
+                        args.iter()
+                            .filter_map(|v| v.as_str())
+                            .any(|arg| matches!(arg, "--dry-run" | "--check" | "--no-write"))
+                    });
+                if is_explicit_dry_run && fallback_safe_mutating_example.is_none() {
+                    fallback_safe_mutating_example =
+                        Some(name.split_whitespace().map(str::to_string).collect());
+                }
                 continue;
             }
             let parts: Vec<String> = name.split_whitespace().map(|s| s.to_string()).collect();
@@ -68,8 +87,8 @@ fn discover_subcommand(
                 && parts
                     .last()
                     .is_some_and(|last| last == "list" || last == "ls");
-            if is_list {
-                return parts;
+            if is_list && fallback_list.is_none() {
+                fallback_list = Some(parts.clone());
             }
             // Don't let an introspection/help command stand in as the
             // representative — scoring `schema`/`completions` misjudges the
@@ -80,8 +99,11 @@ fn discover_subcommand(
             if is_meta {
                 continue;
             }
-            match mutating {
-                Some(false) => {
+            match (effects, legacy_mutating) {
+                (Some("read_only"), _) | (None, Some(false)) => {
+                    if cmd.get("example").is_some() && fallback_example.is_none() {
+                        fallback_example = Some(parts.clone());
+                    }
                     if fallback_explicit.is_none() {
                         fallback_explicit = Some(parts);
                     }
@@ -94,7 +116,12 @@ fn discover_subcommand(
             }
         }
 
-        if let Some(fb) = fallback_explicit.or(fallback_unknown) {
+        if let Some(fb) = fallback_example
+            .or(fallback_list)
+            .or(fallback_explicit)
+            .or(fallback_safe_mutating_example)
+            .or(fallback_unknown)
+        {
             return fb;
         }
     }
@@ -271,20 +298,34 @@ mod tests {
     }
 
     #[test]
-    fn discover_prefers_nested_read_only_list_command() {
+    fn discover_prefers_flat_read_only_list_command() {
         let schema = serde_json::json!({
             "name": "mytool",
             "version": "1.0.0",
             "commands": [
-                {"name": "deploy", "mutating": true},
-                {"name": "apps", "subcommands": [
-                    {"name": "delete", "mutating": true},
-                    {"name": "list", "mutating": false}
-                ]}
+                {"name": "deploy", "effects": "idempotent"},
+                {"name": "apps delete", "effects": "idempotent"},
+                {"name": "apps list", "effects": "read_only"}
             ]
         });
         let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
         assert_eq!(found, vec!["apps".to_string(), "list".to_string()]);
+    }
+
+    #[test]
+    fn discover_prefers_safe_example_over_unqualified_list_command() {
+        let schema = serde_json::json!({
+            "commands": [
+                {"name": "files ls", "effects": "read_only"},
+                {
+                    "name": "config",
+                    "effects": "read_only",
+                    "example": {"args": ["config"]}
+                }
+            ]
+        });
+        let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
+        assert_eq!(found, vec!["config".to_string()]);
     }
 
     #[test]
@@ -297,9 +338,9 @@ mod tests {
             "name": "mytool",
             "version": "1.0.0",
             "commands": [
-                {"name": "schema", "mutating": false},
-                {"name": "completions", "mutating": false},
-                {"name": "run", "mutating": true}
+                {"name": "schema", "effects": "read_only"},
+                {"name": "completions", "effects": "read_only"},
+                {"name": "run", "effects": "idempotent"}
             ]
         });
         let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
@@ -310,18 +351,32 @@ mod tests {
     }
 
     #[test]
-    fn discover_prefers_explicitly_read_only_over_unknown_mutating() {
-        // v0.2: absent mutating means unknown, so a command that states
-        // mutating=false outranks one that says nothing.
+    fn discover_prefers_explicitly_read_only_over_unknown_effects() {
         let schema = serde_json::json!({
             "name": "mytool",
             "version": "1.0.0",
             "commands": [
                 {"name": "mystery"},
-                {"name": "status", "mutating": false}
+                {"name": "status", "effects": "read_only"}
             ]
         });
         let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
         assert_eq!(found, vec!["status".to_string()]);
+    }
+
+    #[test]
+    fn discover_accepts_declared_dry_run_example_for_mutating_tool() {
+        let schema = serde_json::json!({
+            "commands": [
+                {"name": "schema", "effects": "read_only"},
+                {
+                    "name": "align",
+                    "effects": "non_idempotent",
+                    "example": {"args": ["align", "--dry-run", "Cargo.toml"]}
+                }
+            ]
+        });
+        let found = discover_subcommand("/nonexistent-binary", "", &Some(schema));
+        assert_eq!(found, vec!["align".to_string()]);
     }
 }

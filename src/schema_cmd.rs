@@ -6,12 +6,14 @@ use crate::Cli;
 pub fn print_schema() {
     let cmd = Cli::command();
     let schema = json!({
-        "clispec": "0.2",
+        "clispec": "0.3",
         "name": "clispec",
         "version": env!("CARGO_PKG_VERSION"),
         "description": "Score CLI tools against The CLI Spec",
+        "output": {"tty": "text", "piped": "json"},
         "global_args": [
             {"name": "--output", "type": "string", "required": false, "default": "auto",
+             "short": "-o",
              "enum": ["auto", "text", "json"],
              "description": "Output format. auto emits JSON when stdout is not a TTY, human-readable otherwise."},
             {"name": "--json", "type": "boolean", "required": false,
@@ -50,13 +52,33 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
             let mut entry = json!({
                 "name": c.get_name(),
                 "description": c.get_about().map(|s| s.to_string()).unwrap_or_default(),
+                "effects": "read_only",
                 "mutating": false,
             });
             if !args.is_empty() {
                 entry["args"] = json!(args);
             }
-            if let Some(fields) = output_fields_for(c.get_name()) {
-                entry["output_fields"] = fields;
+            match c.get_name() {
+                "completions" => {
+                    entry["output_kind"] = json!("opaque");
+                    entry["media_type"] = json!("text/plain");
+                }
+                "schema" => {
+                    entry["cardinality"] = json!("single");
+                    entry["stdout_schema"] =
+                        json!({"$ref": "https://clispec.dev/schema/v0.3.json"});
+                }
+                name => {
+                    entry["cardinality"] = json!("single");
+                    if let Some(fields) = output_fields_for(name) {
+                        entry["output_fields"] = fields;
+                    } else {
+                        entry["stdout_schema"] = json!({});
+                    }
+                }
+            }
+            if c.get_name() == "score" {
+                entry["example"] = json!({"args": ["score", "echo"]});
             }
             entry
         })
@@ -73,24 +95,8 @@ fn output_fields_for(command: &str) -> Option<Value> {
             {"name": "percentage", "type": "integer"},
             {"name": "grade", "type": "string",
              "description": "Excellent | Good | Fair | Needs Work"},
-            {"name": "principles", "type": "object[]",
+            {"name": "principles", "type": "array", "items": {"type": "object"},
              "description": "Per-principle scores with per-check breakdown"}
-        ])),
-        "schema" => Some(json!([
-            {"name": "clispec", "type": "string",
-             "description": "Schema version string, e.g. \"0.2\"."},
-            {"name": "name", "type": "string",
-             "description": "Binary name of the tool."},
-            {"name": "version", "type": "string",
-             "description": "Semver version of the tool."},
-            {"name": "description", "type": "string",
-             "description": "One-line description of the tool."},
-            {"name": "global_args", "type": "object[]",
-             "description": "Flags that apply to every command (e.g. --json)."},
-            {"name": "commands", "type": "object[]",
-             "description": "Array of command descriptors, each with name, description, mutating, args, and output_fields."},
-            {"name": "errors", "type": "object[]",
-             "description": "Structured error kinds with kind, exit_code, retryable, and description."}
         ])),
         _ => None,
     }

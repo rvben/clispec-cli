@@ -7,7 +7,8 @@ pub mod streams;
 
 use serde::Serialize;
 
-/// The v0.2 conformance checklist (clispec.dev/#conformance), one entry per
+/// The v0.3 conformance checklist (clispec.dev/#conformance), grouped into the
+/// checks this scorer can verify generically without domain credentials.
 /// checklist item. Every scored check MUST map to exactly one of these ids;
 /// a check that cites no checklist item has no basis in the spec and must
 /// not award or deduct points. The summaries are abbreviations for review,
@@ -23,7 +24,7 @@ pub const CHECKLIST_ITEMS: [(&str, &str); 10] = [
     ),
     (
         "schema-validates",
-        "Exposes a schema subcommand whose output validates against clispec.dev/schema/v0.2.json",
+        "Exposes a flat schema whose output validates against clispec.dev/schema/v0.3.json",
     ),
     (
         "schema-offline",
@@ -47,11 +48,11 @@ pub const CHECKLIST_ITEMS: [(&str, &str); 10] = [
     ),
     (
         "idempotent-repeats",
-        "Re-running a satisfied command exits zero; incompatible repeats emit conflict",
+        "Commands declare effects; idempotent operations use conflict for incompatible state",
     ),
     (
         "bounded-lists",
-        "List commands support --limit/--offset and --fields with in-band truncation metadata",
+        "Only unbounded data commands require declared pagination and field selection",
     ),
 ];
 
@@ -66,19 +67,21 @@ pub fn checklist_item(check_name: &str) -> Option<&'static str> {
         "Structured errors" => "error-envelope",
         "schema command exists"
         | "Valid JSON schema"
-        | "Validates against clispec v0.2"
+        | "Validates against clispec v0.3"
         | "Error kinds documented"
         | "Output fields declared"
         | "Global args declared"
         | "Exit codes on error kinds"
-        | "Mutation markers on all commands" => "schema-validates",
+        | "Effects on all commands" => "schema-validates",
         "schema works without config" => "schema-offline",
         "schema mentioned in --help" => "help-mentions-schema",
         "Clean stdout when piped" | "Messages on stderr only" => "stream-separation",
         "No TTY hang" => "non-interactive",
         "--yes flag" => "confirmation-refusal",
-        "Mutating markers in schema" | "Conflict error kind" => "idempotent-repeats",
-        "--limit flag" | "Pagination flag" | "--fields flag" => "bounded-lists",
+        "Effects declarations" | "Idempotent conflict contract" => "idempotent-repeats",
+        "Cardinality declarations"
+        | "Unbounded pagination declarations"
+        | "Unbounded field selection" => "bounded-lists",
         _ => return None,
     };
     Some(id)
