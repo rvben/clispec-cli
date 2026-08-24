@@ -320,7 +320,7 @@ mod tests {
                 {
                     "name": "config",
                     "effects": "read_only",
-                    "example": {"args": ["config"]}
+                    "example": {"args": []}
                 }
             ]
         });
@@ -372,7 +372,7 @@ mod tests {
                 {
                     "name": "align",
                     "effects": "non_idempotent",
-                    "example": {"args": ["align", "--dry-run", "Cargo.toml"]}
+                    "example": {"args": ["--dry-run", "Cargo.toml"]}
                 }
             ]
         });

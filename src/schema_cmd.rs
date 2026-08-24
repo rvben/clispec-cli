@@ -10,7 +10,7 @@ pub fn print_schema() {
         "name": "clispec",
         "version": env!("CARGO_PKG_VERSION"),
         "description": "Score CLI tools against The CLI Spec",
-        "output": {"tty": "text", "piped": "json"},
+        "output": {"tty": "text", "piped": "json", "ci": "json", "ci_env_vars": ["CI"]},
         "global_args": [
             {"name": "--output", "type": "string", "required": false, "default": "auto",
              "short": "-o",
@@ -78,7 +78,7 @@ fn walk_commands(cmd: &clap::Command) -> Vec<Value> {
                 }
             }
             if c.get_name() == "score" {
-                entry["example"] = json!({"args": ["score", "echo"]});
+                entry["example"] = json!({"args": ["echo"]});
             }
             entry
         })

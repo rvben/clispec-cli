@@ -184,7 +184,7 @@ impl CheckContext {
     fn representative_example(&self) -> Option<Probe> {
         let commands = self.schema_json.as_ref()?.get("commands")?.as_array()?;
         let example = find_command(commands, &self.subcommand.join(" "))?.get("example")?;
-        let args = example
+        let extra_args: Vec<String> = example
             .get("args")
             .and_then(|a| a.as_array())
             .map(|a| {
@@ -193,6 +193,8 @@ impl CheckContext {
                     .collect()
             })
             .unwrap_or_default();
+        let mut args = self.subcommand.clone();
+        args.extend(extra_args);
         let stdin = example
             .get("stdin")
             .and_then(|s| s.as_str())
@@ -264,7 +266,7 @@ mod tests {
             })),
         };
         let probe = ctx.probe();
-        assert_eq!(probe.args, vec!["-".to_string()]);
+        assert_eq!(probe.args, vec!["scan".to_string(), "-".to_string()]);
         assert_eq!(probe.stdin.as_deref(), Some("hi"));
     }
 
