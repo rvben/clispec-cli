@@ -25,9 +25,10 @@
       "type": "string"
     },
     "output": {
-      "description": "How the tool's default (unflagged) output behaves, so a consumer knows whether it must request structured output. `piped` is the format emitted when stdout is not a TTY and no explicit format flag is given: a structured value (e.g. \"json\") means the tool is safe to pipe into a JSON consumer directly; \"text\" means the consumer should pass the declared format flag.",
+      "description": "How the tool's default (unflagged) output behaves, so a consumer knows whether it must request structured output. `piped` is the format emitted when stdout is not a TTY and no explicit format flag is given. If the tool recognizes that it is running in CI, `ci` overrides the TTY/piped default; an explicit format flag always overrides every default.",
       "type": "object",
       "required": ["piped"],
+      "dependentRequired": { "ci": ["ci_env_vars"] },
       "properties": {
         "tty": {
           "description": "Default format on a TTY (usually \"text\").",
@@ -38,6 +39,18 @@
           "description": "Default format when stdout is not a TTY and no explicit format is given.",
           "type": "string",
           "minLength": 1
+        },
+        "ci": {
+          "description": "Default format when the tool recognizes a CI environment and no explicit format is given. When omitted, TTY/piped selection still applies in CI.",
+          "type": "string",
+          "minLength": 1
+        },
+        "ci_env_vars": {
+          "description": "Environment variables whose enabled presence makes the tool select output.ci. Required with ci so consumers and conformance tools can reproduce the selection.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },
@@ -53,7 +66,7 @@
       "items": { "$ref": "#/$defs/command" }
     },
     "errors": {
-      "description": "The finite set of `kind` values the tool emits in structured errors, with the exit code each maps to. Consumers write exhaustive handlers against this set and branch on the exit code without parsing stderr.",
+      "description": "The finite set of `kind` values the tool emits in structured errors. A kind normally maps to one fixed exit code; a command that faithfully propagates another process's code declares that exceptional passthrough contract instead.",
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/error" }
@@ -599,7 +612,7 @@
     },
     "error": {
       "type": "object",
-      "required": ["kind", "exit_code"],
+      "required": ["kind"],
       "properties": {
         "kind": {
           "description": "Stable identifier consumers branch on. Snake_case by convention.",
@@ -608,10 +621,14 @@
           "pattern": "^[a-z][a-z0-9_]*$"
         },
         "exit_code": {
-          "description": "The exit code the tool returns for this error kind. Required in v0.3: branching on the exit code alone, before parsing anything, is the cheapest thing a consumer can do, and it only works if every kind declares one.",
+          "description": "The fixed exit code the tool returns for this error kind. Required unless exit_code_passthrough is true.",
           "type": "integer",
           "minimum": 1,
           "maximum": 255
+        },
+        "exit_code_passthrough": {
+          "description": "True only when the command propagates the exit code of the process or remote job it ran, so this error kind has no single fixed code. Mutually exclusive with exit_code; consumers must inspect the structured kind rather than branch on one code.",
+          "const": true
         },
         "retryable": {
           "description": "Whether a consumer should retry on this error.",
@@ -620,7 +637,17 @@
         "description": {
           "type": "string"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": ["exit_code"],
+          "properties": { "exit_code_passthrough": { "not": {} } }
+        },
+        {
+          "required": ["exit_code_passthrough"],
+          "properties": { "exit_code": { "not": {} } }
+        }
+      ]
     }
   },
   "x-standard-error-kinds": {

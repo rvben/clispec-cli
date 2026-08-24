@@ -163,7 +163,10 @@ fn exit_code_coverage(schema: &serde_json::Value) -> ExitCodeCoverage {
     let total = errors.len() as u32;
     let declared = errors
         .iter()
-        .filter(|e| e.get("exit_code").is_some_and(|c| c.is_i64() || c.is_u64()))
+        .filter(|e| {
+            e.get("exit_code").is_some_and(|c| c.is_i64() || c.is_u64())
+                || e.get("exit_code_passthrough").and_then(|v| v.as_bool()) == Some(true)
+        })
         .count() as u32;
     if declared == total {
         ExitCodeCoverage::Full
@@ -307,6 +310,15 @@ mod tests {
             {"kind": "not_found", "exit_code": 4}
         ]});
         assert!(matches!(exit_code_coverage(&full), ExitCodeCoverage::Full));
+
+        let with_passthrough = serde_json::json!({"errors": [
+            {"kind": "auth", "exit_code": 3},
+            {"kind": "job_failed", "exit_code_passthrough": true}
+        ]});
+        assert!(matches!(
+            exit_code_coverage(&with_passthrough),
+            ExitCodeCoverage::Full
+        ));
 
         // The helper still reports partial legacy documents clearly even
         // though v0.3 validation rejects them before this check is scored.

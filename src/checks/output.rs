@@ -92,21 +92,23 @@ pub fn check(ctx: &CheckContext) -> PrincipleScore {
             runner::PROBE_TIMEOUT,
         );
         let auto_structured = serde_json::from_str::<serde_json::Value>(&result.stdout).is_ok();
-        let piped_default = declared_piped_default(ctx);
+        let (default_source, piped_default) = declared_unflagged_default(ctx);
         checks.push(if auto_structured {
             CheckResult::pass_with(CHECK_3, "structured by default when piped")
         } else if piped_default.as_deref().is_some_and(is_human_format) {
             CheckResult::pass_with(
                 CHECK_3,
                 &format!(
-                    "declared human default (output.piped = {})",
+                    "declared human default (output.{default_source} = {})",
                     piped_default.unwrap()
                 ),
             )
         } else if let Some(format) = piped_default {
             CheckResult::fail_with(
                 CHECK_3,
-                &format!("declares output.piped = {format} but does not emit it when piped"),
+                &format!(
+                    "declares output.{default_source} = {format} but does not emit it in this environment"
+                ),
             )
         } else {
             CheckResult::fail_with(
@@ -222,15 +224,46 @@ fn declared_outcome_codes(ctx: &CheckContext) -> Vec<i32> {
         .unwrap_or_default()
 }
 
-/// The `output.piped` value declared in the schema (the format emitted when
-/// stdout is not a TTY and no format flag is given), if the tool declares one.
-fn declared_piped_default(ctx: &CheckContext) -> Option<String> {
-    ctx.schema_json
-        .as_ref()?
-        .get("output")?
-        .get("piped")?
-        .as_str()
-        .map(str::to_string)
+/// The unflagged default that applies to the scorer's environment. A declared
+/// CI default takes precedence when a conventional CI marker is enabled;
+/// otherwise the scorer's captured stdout means the piped default applies.
+fn declared_unflagged_default(ctx: &CheckContext) -> (&'static str, Option<String>) {
+    declared_unflagged_default_with(ctx, |name| std::env::var(name).ok())
+}
+
+fn declared_unflagged_default_with(
+    ctx: &CheckContext,
+    getenv: impl Fn(&str) -> Option<String>,
+) -> (&'static str, Option<String>) {
+    let output = ctx.schema_json.as_ref().and_then(|s| s.get("output"));
+    let in_declared_ci = output
+        .and_then(|o| o.get("ci_env_vars"))
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .any(|name| getenv(name).is_some_and(|value| env_enabled(&value)));
+    if in_declared_ci {
+        let ci = output
+            .and_then(|o| o.get("ci"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if ci.is_some() {
+            return ("ci", ci);
+        }
+    }
+    let piped = output
+        .and_then(|o| o.get("piped"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    ("piped", piped)
+}
+
+fn env_enabled(value: &str) -> bool {
+    !matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "false" | "no" | "off"
+    )
 }
 
 /// Whether a format name is human-readable (non-structured).
@@ -292,13 +325,45 @@ mod tests {
     }
 
     #[test]
-    fn declared_piped_default_reads_output_field() {
+    fn declared_unflagged_default_reads_output_field() {
         let ctx = ctx_with(serde_json::json!({"output": {"tty": "text", "piped": "text"}}));
-        assert_eq!(declared_piped_default(&ctx).as_deref(), Some("text"));
         assert_eq!(
-            declared_piped_default(&ctx_with(serde_json::json!({}))),
-            None
+            declared_unflagged_default_with(&ctx, |_| None),
+            ("piped", Some("text".into()))
         );
+        assert_eq!(
+            declared_unflagged_default_with(&ctx_with(serde_json::json!({})), |_| None),
+            ("piped", None)
+        );
+    }
+
+    #[test]
+    fn declared_ci_default_takes_precedence_in_ci() {
+        let ctx = ctx_with(serde_json::json!({
+            "output": {
+                "tty": "text", "piped": "json", "ci": "table",
+                "ci_env_vars": ["CI", "GITLAB_CI"]
+            }
+        }));
+        assert_eq!(
+            declared_unflagged_default_with(&ctx, |name| {
+                (name == "GITLAB_CI").then(|| "true".into())
+            }),
+            ("ci", Some("table".into()))
+        );
+        assert_eq!(
+            declared_unflagged_default_with(&ctx, |_| None),
+            ("piped", Some("json".into()))
+        );
+    }
+
+    #[test]
+    fn ci_marker_values_use_falsey_semantics() {
+        assert!(env_enabled("true"));
+        assert!(env_enabled("1"));
+        for value in ["", "0", "false", "NO", "off"] {
+            assert!(!env_enabled(value));
+        }
     }
 
     #[test]
